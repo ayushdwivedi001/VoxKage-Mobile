@@ -1,0 +1,39 @@
+name: VoxKage Keep Alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # Trigger every 10 minutes
+  workflow_dispatch:          # Allow manual triggers
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Space Endpoint
+        run: |
+          echo "💓 Sending heartbeat query to Hugging Face Space..."
+          
+          SPACE_URL="${{ secrets.VOXKAGE_SPACE_URL }}"
+          if [ -z "$SPACE_URL" ]; then
+            echo "❌ Error: VOXKAGE_SPACE_URL secret is not configured in GitHub Settings."
+            exit 1
+          fi
+          
+          # Perform ping with 3 retry attempts
+          success=false
+          for i in 1 2 3; do
+            echo "Heartbeat attempt $i..."
+            if curl -sf --connect-timeout 10 --max-time 15 "$SPACE_URL/health" > /dev/null; then
+              success=true
+              break
+            fi
+            echo "⚠️ Heartbeat attempt $i failed. Retrying in 5 seconds..."
+            sleep 5
+          done
+          
+          if [ "$success" = true ]; then
+            echo "✅ Heartbeat acknowledged. Space is active."
+          else
+            echo "❌ Space failed to respond."
+            exit 1
+          fi

@@ -1,0 +1,28 @@
+# Environment files
+.env
+.env.local
+.env.production
+.env.development
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Deployment
+*.egg-info/
+dist/
+build/
