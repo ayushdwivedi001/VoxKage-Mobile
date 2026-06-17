@@ -163,32 +163,6 @@ def get_root():
 def health():
     return {"status": "alive", "engine": "VoxKage Mobile Cloud", "timestamp": "2026-06-17"}
 
-@app.get("/models")
-def get_models():
-    """
-    Fetch active models from OpenCode Zen API or return standard default fallbacks.
-    """
-    import os
-    import requests
-    api_key = os.getenv("OPENCODE_API_KEY")
-    default_models = ["deepseek-v4-flash-free", "gemini-2.5-flash", "claude-3.5-sonnet"]
-    if not api_key:
-        return {"models": default_models}
-    try:
-        response = requests.get(
-            "https://opencode.ai/zen/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=5
-        )
-        if response.status_code == 200:
-            data = response.json()
-            models = [m["id"] for m in data.get("data", [])]
-            if models:
-                return {"models": models}
-    except Exception as e:
-        print(f"Error calling OpenCode Zen models API: {e}")
-    return {"models": default_models}
-
 
 # Enable CORS for mobile clients and local previews
 app.add_middleware(
@@ -259,7 +233,31 @@ def verify_otp(req: OTPVerify):
         detail="Invalid or expired OTP code."
     )
 
+class MasterLoginRequest(BaseModel):
+    email: EmailStr
+    master_key: str
+
+@app.post("/auth/master-login")
+def master_login(req: MasterLoginRequest):
+    """
+    Direct developer login using the Master Key, returning a real JWT token.
+    """
+    expected_master = os.getenv("VOXKAGE_MASTER_KEY")
+    if not expected_master:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Master Key configuration missing on backend."
+        )
+    if req.master_key == expected_master:
+        token = create_access_token(data={"sub": req.email})
+        return {"access_token": token, "token_type": "bearer"}
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Unauthorized: Master Key verification failed."
+    )
+
 # --- Session Management REST Endpoints ---
+
 
 @app.get("/sessions")
 def get_sessions(user: str = Depends(get_current_user)):
@@ -303,6 +301,11 @@ def save_project(
 @app.get("/projects/{project_id}")
 def get_single_project(project_id: str, user: str = Depends(get_current_user)):
     return get_project(project_id, user)
+
+@app.get("/models")
+def get_models(user: str = Depends(get_current_user)):
+    from opencode_client import list_opencode_models
+    return list_opencode_models()
 
 # --- File Upload & RAG Indexing Endpoint ---
 

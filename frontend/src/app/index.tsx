@@ -52,6 +52,7 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
   const [streamingText, setStreamingText] = useState('');
+  const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
   const [isNewChat, setIsNewChat] = useState(true);
 
   // Models State
@@ -60,6 +61,7 @@ export default function ChatScreen() {
   const VARIANTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
   const [activeVariantIndex, setActiveVariantIndex] = useState(2); // default High
   const [showModelModal, setShowModelModal] = useState(false);
+  const [showVariantDropdown, setShowVariantDropdown] = useState(false);
 
   // Inline Sidebar Session Rename State
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -78,6 +80,7 @@ export default function ChatScreen() {
   // Animated Drawers
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isPlaygroundOpen, setIsPlaygroundOpen] = useState(false);
+  const [showSidebarSettings, setShowSidebarSettings] = useState(false);
 
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
   const playgroundAnim = useRef(new Animated.Value(screenWidth)).current;
@@ -318,9 +321,12 @@ window.onresize = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        if (data.models && data.models.length > 0) {
-          setModels(data.models);
-          setActiveModel(data.models[0]);
+        const modelList = Array.isArray(data) ? data : (data.models || []);
+        if (modelList.length > 0) {
+          setModels(modelList);
+          if (!modelList.includes(activeModel)) {
+            setActiveModel(modelList[0]);
+          }
         }
       }
     } catch (e) {
@@ -524,6 +530,8 @@ window.onresize = () => {
         const data = JSON.parse(event.data);
         if (data.type === 'token') {
           setStreamingText((prev) => prev + data.content);
+        } else if (data.type === 'hud_log') {
+          setThinkingStatus(data.content);
         } else if (data.type === 'laptop_log') {
           setMessages((prev) => {
             const last = prev[prev.length - 1];
@@ -558,6 +566,7 @@ window.onresize = () => {
             return '';
           });
           setLoading(false);
+          setThinkingStatus(null);
         }
       } catch (e) {
         console.error('Socket message parse error', e);
@@ -678,6 +687,7 @@ window.onresize = () => {
     setInputText('');
     setLoading(true);
     setStreamingText('');
+    setThinkingStatus(null);
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
@@ -699,6 +709,7 @@ window.onresize = () => {
         } else {
           Alert.alert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
           setLoading(false);
+          setThinkingStatus(null);
         }
       }, 1000);
     }
@@ -853,6 +864,17 @@ window.onresize = () => {
 
   return (
     <View style={styles.container}>
+      {Platform.OS === 'web' && (
+        <style dangerouslySetInnerHTML={{ __html: `
+          *::-webkit-scrollbar {
+            display: none !important;
+          }
+          * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+        `}} />
+      )}
       {/* Fluid WebGL-style animated wavy background */}
       {Platform.OS === 'web' ? (
         // @ts-ignore
@@ -922,20 +944,30 @@ window.onresize = () => {
         ) : (
           <FlatList
             ref={flatListRef}
-            data={
-              streamingText
+            data={[
+              ...messages,
+              ...(streamingText
                 ? [
-                    ...messages,
                     {
                       id: 'streaming',
                       role: 'assistant',
                       content: streamingText,
                     } as ChatMessage,
                   ]
-                : messages
-            }
+                : []),
+              ...(loading
+                ? [
+                    {
+                      id: 'thinking',
+                      role: 'assistant',
+                      content: thinkingStatus || 'VoxKage is processing, Sir...',
+                    } as ChatMessage,
+                  ]
+                : []),
+            ]}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.chatListContent}
+            showsVerticalScrollIndicator={false}
             renderItem={({ item }) => {
               if (item.role === 'user') {
                 return (
@@ -959,10 +991,26 @@ window.onresize = () => {
                   </View>
                 );
               } else {
+                if (item.id === 'thinking') {
+                  return (
+                    <View style={styles.assistantBubbleWrapper}>
+                      <View style={styles.assistantAvatar}>
+                        <LogoV size={18} />
+                      </View>
+                      <View style={[styles.assistantBubble, styles.thinkingBubble]}>
+                        <View style={styles.thinkingHeader}>
+                          <ActivityIndicator size="small" color="#60a5fa" style={styles.thinkingSpinner} />
+                          <Text style={styles.thinkingTitle}>VoxKage is thinking...</Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }
+
                 return (
                   <View style={styles.assistantBubbleWrapper}>
                     <View style={styles.assistantAvatar}>
-                      <Text style={styles.avatarText}>V</Text>
+                      <LogoV size={18} />
                     </View>
                     <View style={styles.assistantBubble}>
                       <MarkdownRenderer text={item.content} />
@@ -981,6 +1029,76 @@ window.onresize = () => {
 
         {/* Input Bar Section */}
         <View style={styles.inputAreaContainer}>
+          {showVariantDropdown && (
+            <TouchableOpacity
+              activeOpacity={1}
+              style={styles.dropdownBackdrop}
+              onPress={() => setShowVariantDropdown(false)}
+            />
+          )}
+          {showVariantDropdown && (
+            <View style={styles.variantDropdown}>
+              {VARIANTS.map((v, i) => (
+                <TouchableOpacity
+                  key={v}
+                  style={[
+                    styles.variantDropdownItem,
+                    activeVariantIndex === i && styles.variantDropdownItemActive,
+                  ]}
+                  onPress={() => {
+                    setActiveVariantIndex(i);
+                    setShowVariantDropdown(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.variantDropdownText,
+                      activeVariantIndex === i && styles.variantDropdownTextActive,
+                    ]}
+                  >
+                    {v}
+                  </Text>
+                  {activeVariantIndex === i && (
+                    <Ionicons name="checkmark" size={12} color="#60a5fa" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Model & Variant Toggles (Capsules) — Placed above the input to avoid safe area overlap */}
+          <View style={styles.capsulesContainer}>
+            <TouchableOpacity
+              style={styles.capsule}
+              onPress={() => setShowModelModal(true)}
+            >
+              <Ionicons
+                name="sparkles-outline"
+                size={12}
+                color="#60a5fa"
+              />
+              <Text style={styles.capsuleText}>
+                {formatModelName(activeModel)}
+              </Text>
+              <Ionicons name="chevron-down" size={10} color="#94a3b8" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.capsule}
+              onPress={() => setShowVariantDropdown(!showVariantDropdown)}
+            >
+              <Ionicons
+                name="options-outline"
+                size={12}
+                color="#60a5fa"
+              />
+              <Text style={styles.capsuleText}>
+                Variant: {VARIANTS[activeVariantIndex]}
+              </Text>
+              <Ionicons name="chevron-down" size={10} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+
           <View style={styles.inputPill}>
             <TouchableOpacity
               onPress={handleFileUpload}
@@ -988,16 +1106,16 @@ window.onresize = () => {
               disabled={uploadingFile}
             >
               {uploadingFile ? (
-                <ActivityIndicator size="small" color="#2563eb" />
+                <ActivityIndicator size="small" color="#3b82f6" />
               ) : (
-                <Ionicons name="add-outline" size={24} color="#9ca3af" />
+                <Ionicons name="add-outline" size={24} color="#94a3b8" />
               )}
             </TouchableOpacity>
 
             <TextInput
               style={styles.inputField}
               placeholder="Message VoxKage..."
-              placeholderTextColor="#4b5563"
+              placeholderTextColor="#475569"
               value={inputText}
               onChangeText={setInputText}
               multiline={true}
@@ -1007,7 +1125,7 @@ window.onresize = () => {
               <Ionicons
                 name={isVoiceActive ? 'mic' : 'mic-outline'}
                 size={20}
-                color={isVoiceActive ? '#ef4444' : '#9ca3af'}
+                color={isVoiceActive ? '#ef4444' : '#94a3b8'}
               />
             </TouchableOpacity>
 
@@ -1020,41 +1138,9 @@ window.onresize = () => {
                 <Ionicons
                   name="arrow-up"
                   size={16}
-                  color={inputText.trim() ? '#ffffff' : '#4b5563'}
+                  color={inputText.trim() ? '#ffffff' : '#475569'}
                 />
               </View>
-            </TouchableOpacity>
-          </View>
-
-          {/* Model & Variant Toggles (Capsules) */}
-          <View style={styles.capsulesContainer}>
-            <TouchableOpacity
-              style={styles.capsule}
-              onPress={() => setShowModelModal(true)}
-            >
-              <Ionicons
-                name="sparkles-outline"
-                size={12}
-                color="#2563eb"
-              />
-              <Text style={styles.capsuleText}>
-                {formatModelName(activeModel)}
-              </Text>
-              <Ionicons name="chevron-down" size={10} color="#9ca3af" />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.capsule}
-              onPress={toggleVariant}
-            >
-              <Ionicons
-                name="options-outline"
-                size={12}
-                color="#2563eb"
-              />
-              <Text style={styles.capsuleText}>
-                Variant: {VARIANTS[activeVariantIndex]}
-              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1101,7 +1187,7 @@ window.onresize = () => {
 
             {/* Models List */}
             <Text style={styles.inlineModalSectionLabel}>Available Models</Text>
-            <ScrollView style={styles.inlineModalList} contentContainerStyle={{ gap: 8 }}>
+            <ScrollView style={styles.inlineModalList} contentContainerStyle={{ gap: 8 }} showsVerticalScrollIndicator={false}>
               {models.map((model) => (
                 <TouchableOpacity
                   key={model}
@@ -1150,7 +1236,7 @@ window.onresize = () => {
       <Animated.View style={[styles.sidebarDrawer, { left: sidebarAnim }]}>
         <View style={styles.sidebarHeader}>
           <LogoV size={24} />
-          <Text style={styles.sidebarTitle}>VoxKage Mobile</Text>
+          <Text style={styles.sidebarTitle}>VoxKage</Text>
           <TouchableOpacity onPress={closeSidebar}>
             <Ionicons name="close-outline" size={22} color="#9ca3af" />
           </TouchableOpacity>
@@ -1174,7 +1260,7 @@ window.onresize = () => {
         </TouchableOpacity>
 
         <Text style={styles.historyLabel}>History</Text>
-        <ScrollView style={styles.sessionsList}>
+        <ScrollView style={styles.sessionsList} showsVerticalScrollIndicator={false}>
           {sessions.map((s) => (
             <View
               key={s.id}
@@ -1239,20 +1325,45 @@ window.onresize = () => {
           ))}
         </ScrollView>
 
+        {/* Settings Popover inside Sidebar Drawer */}
+        {showSidebarSettings && (
+          <View style={styles.sidebarSettingsPopover}>
+            <View style={styles.sidebarSettingsHeader}>
+              <Text style={styles.sidebarSettingsTitle}>Settings</Text>
+              <TouchableOpacity onPress={() => setShowSidebarSettings(false)}>
+                <Ionicons name="close" size={16} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                setShowSidebarSettings(false);
+                closeSidebar();
+                handleLogout();
+              }}
+              style={styles.sidebarSettingsItem}
+            >
+              <Ionicons name="log-out-outline" size={16} color="#ef4444" />
+              <Text style={styles.sidebarSettingsItemText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.sidebarFooter}>
           <View style={styles.userSection}>
-            <Ionicons name="person-circle-outline" size={28} color="#2563eb" />
+            <Ionicons name="person-circle-outline" size={32} color="#3b82f6" />
             <View style={styles.userInfo}>
               <Text style={styles.userHonorific}>Sir</Text>
               <Text style={styles.userEmail} numberOfLines={1}>
                 {email || 'sir@voxkage.ai'}
               </Text>
             </View>
+            <TouchableOpacity
+              onPress={() => setShowSidebarSettings(!showSidebarSettings)}
+              style={styles.settingsIconBtn}
+            >
+              <Ionicons name="settings-outline" size={18} color="#9ca3af" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-            <Ionicons name="log-out-outline" size={18} color="#ef4444" />
-            <Text style={styles.logoutText}>Sign Out</Text>
-          </TouchableOpacity>
         </View>
       </Animated.View>
 
@@ -1408,10 +1519,10 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 8,
-    backgroundColor: '#171717',
+    backgroundColor: '#0c1222',
     justifyContent: 'center',
     alignItems: 'center',
-    borderColor: '#262626',
+    borderColor: '#1e293b',
     borderWidth: 1,
   },
   avatarText: {
@@ -1420,12 +1531,56 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   assistantBubble: {
-    flex: 1,
-    paddingVertical: 4,
+    flexShrink: 1,
+    backgroundColor: 'rgba(12, 18, 33, 0.45)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    ...Platform.select({
+      web: {
+        backdropFilter: 'blur(12px)',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+      },
+      default: {},
+    }),
   },
   typingIndicatorContainer: {
     marginTop: 6,
     alignItems: 'flex-start',
+  },
+  thinkingBubble: {
+    minWidth: 180,
+  },
+  thinkingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  thinkingSpinner: {
+    marginRight: 6,
+  },
+  thinkingTitle: {
+    color: '#60a5fa',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  thinkingStatusText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontStyle: 'italic',
+    paddingLeft: 20,
+  },
+  streamingStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  streamingStatusText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontStyle: 'italic',
   },
   laptopLogWrapper: {
     flexDirection: 'row',
@@ -1466,28 +1621,41 @@ const styles = StyleSheet.create({
   },
   inputAreaContainer: {
     padding: 12,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 12,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 16,
   },
   inputPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#171717',
+    backgroundColor: '#0f172a',
     borderWidth: 1,
-    borderColor: '#262626',
+    borderColor: '#1e293b',
     borderRadius: 24,
     paddingHorizontal: 6,
-    minHeight: 46,
+    minHeight: 48,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+      },
+      default: {},
+    }),
   },
   inputAddBtn: {
     padding: 6,
   },
   inputField: {
     flex: 1,
-    color: '#f3f4f6',
+    color: '#f8fafc',
     fontSize: 14.5,
-    paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
+    paddingTop: Platform.OS === 'web' ? 12 : 8,
+    paddingBottom: Platform.OS === 'web' ? 6 : 8,
     maxHeight: 120,
+    ...Platform.select({
+      web: {
+        outlineStyle: 'none',
+      },
+      default: {},
+    }),
   },
   inputVoiceBtn: {
     padding: 6,
@@ -1496,37 +1664,43 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   sendCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#262626',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#1e293b',
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendCircleActive: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#3b82f6',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 0 8px rgba(59, 130, 246, 0.5)',
+      },
+      default: {},
+    }),
   },
   capsulesContainer: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
+    marginBottom: 8,
     paddingHorizontal: 4,
   },
   capsule: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: '#171717',
-    borderColor: '#262626',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#0c1222',
+    borderColor: '#1e293b',
     borderWidth: 1,
   },
   capsuleText: {
     fontSize: 11,
-    fontWeight: '500',
-    color: '#9ca3af',
+    fontWeight: '600',
+    color: '#94a3b8',
   },
   voiceOverlay: {
     ...StyleSheet.absoluteFill,
@@ -1675,7 +1849,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
   },
   userInfo: {
     flex: 1,
@@ -1689,17 +1862,51 @@ const styles = StyleSheet.create({
     color: '#4b5563',
     fontSize: 11,
   },
-  logoutBtn: {
+  settingsIconBtn: {
+    padding: 6,
+  },
+  sidebarSettingsPopover: {
+    position: 'absolute',
+    bottom: 68,
+    left: 12,
+    right: 12,
+    backgroundColor: '#0c1222',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    borderRadius: 12,
+    padding: 12,
+    zIndex: 110,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+      },
+      default: {},
+    }),
+  },
+  sidebarSettingsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    marginBottom: 8,
+  },
+  sidebarSettingsTitle: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sidebarSettingsItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    height: 36,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-    borderRadius: 8,
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
   },
-  logoutText: {
+  sidebarSettingsItemText: {
     color: '#ef4444',
     fontSize: 13,
     fontWeight: '600',
@@ -1923,5 +2130,50 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontSize: 10,
     marginTop: 1,
+  },
+  dropdownBackdrop: {
+    position: 'absolute',
+    top: -1000,
+    bottom: -1000,
+    left: -1000,
+    right: -1000,
+    zIndex: 999,
+  },
+  variantDropdown: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 112 : 104,
+    right: 16,
+    backgroundColor: '#0c1222',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    borderRadius: 12,
+    padding: 6,
+    width: 130,
+    zIndex: 1000,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      },
+      default: {},
+    }),
+  },
+  variantDropdownItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  variantDropdownItemActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+  },
+  variantDropdownText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  variantDropdownTextActive: {
+    color: '#60a5fa',
   },
 });

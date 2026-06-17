@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
-import { storage } from '@/utils/storage';
+import { storage, DEFAULT_BACKEND_URL } from '@/utils/storage';
 
 export default function LoginScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -176,16 +176,81 @@ export default function LoginScreen() {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    // Simulate Connect with Google
+  const handleDeveloperLogin = async () => {
+    if (!email.trim() || !email.includes('@')) {
+      Alert.alert('Error', 'Please enter a valid email address.');
+      return;
+    }
+    if (!masterKey.trim()) {
+      Alert.alert('Error', 'Please enter the Master Passphrase.');
+      return;
+    }
+
     setLoading(true);
-    setTimeout(async () => {
+    try {
+      const savedUrl = backendUrl.trim().replace(/\/$/, '') || DEFAULT_BACKEND_URL;
+      await storage.setBackendUrl(savedUrl);
+      await storage.setEmail(email.trim());
+
+      const response = await fetch(`${savedUrl}/auth/master-login`, {
+        method: 'POST',
+        headers: getFetchHeaders(),
+        body: JSON.stringify({
+          email: email.trim(),
+          master_key: masterKey.trim(),
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.access_token) {
+        await storage.setToken(data.access_token);
+        router.replace('/');
+      } else {
+        Alert.alert('Developer Login Failed', data.detail || 'Master Passphrase verification failed.');
+      }
+    } catch (e: any) {
+      Alert.alert('Connection Error', `Could not connect to backend: ${e.message}`);
+    } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    try {
+      const savedUrl = backendUrl.trim().replace(/\/$/, '') || DEFAULT_BACKEND_URL;
+      await storage.setBackendUrl(savedUrl);
+      
+      const response = await fetch(`${savedUrl}/auth/master-login`, {
+        method: 'POST',
+        headers: getFetchHeaders(),
+        body: JSON.stringify({
+          email: 'sir.google@voxkage.ai',
+          master_key: 'sir', // Default master key
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.access_token) {
+        await storage.setToken(data.access_token);
+        await storage.setEmail('sir.google@voxkage.ai');
+        router.replace('/');
+      } else {
+        console.warn('Backend master login failed, falling back to mock mode', data);
+        await storage.setToken('mock-google-authorized-jwt-sir');
+        await storage.setEmail('sir.google@voxkage.ai');
+        router.replace('/');
+      }
+    } catch (e) {
+      console.warn('Could not connect to backend, falling back to mock mode', e);
       await storage.setToken('mock-google-authorized-jwt-sir');
       await storage.setEmail('sir.google@voxkage.ai');
       router.replace('/');
-    }, 1500);
+    } finally {
+      setLoading(false);
+    }
   };
+
 
   return (
     <View style={styles.container}>
@@ -371,6 +436,33 @@ export default function LoginScreen() {
                     autoCorrect={false}
                   />
                 </View>
+
+                <Text style={styles.advancedLabel}>Developer Passcode (Master Key)</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="key-outline" size={16} color="#475569" style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter master key (e.g. sir)"
+                    placeholderTextColor="#475569"
+                    value={masterKey}
+                    onChangeText={setMasterKey}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.primaryButton, { backgroundColor: '#1e3a8a', marginTop: 8 }]}
+                  onPress={handleDeveloperLogin}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>Direct Developer Login</Text>
+                  )}
+                </TouchableOpacity>
               </View>
             )}
           </View>

@@ -692,18 +692,25 @@ async def run_agentic_loop(
     soul_context = recall_user(user_id, "")
     
     # System instructions
+    system_prompt = (
+        "You are VoxKage, an advanced OS-level agentic AI assistant with direct access to real MCP tools.\n"
+        "You are a witty, dry, slightly deadpan AI with a distinct personality — loyal, proactive, professional, and sharp.\n"
+        "Always address the user as 'sir' (this is non-negotiable).\n"
+        "Never refuse a task. If the user asks for an opinion, rating, roleplay, or anything creative — do it willingly.\n"
+        "Be proactive: after completing a task, suggest what to do next when relevant.\n"
+        "Keep responses concise — don't over-explain.\n"
+        "The current year is 2026. Prioritize current 2026 data and context.\n\n"
+        f"--- USER SOUL PROFILE MEMORIES ---\n{soul_context}\n\n"
+        "PRIME DIRECTIVE: CALL TOOLS directly when asked to execute tasks. Do not print raw JSON.\n"
+        "Never say you cannot perform an action — if it requires laptop interaction (volume, apps, files, git, terminal), "
+        "always call the 'laptop_command' tool. If it requires web searching, call the 'web_search' or 'web_search_deep' tools.\n"
+        "Do not generate tool announcements yourself. The backend will automatically stream the tool execution announcement (`*[Action description]*`) to the user. Simply generate the tool call directly. "
+        "Once the tool returns the output, summarize the findings for the user in 1-3 plain, professional, and concise sentences."
+    )
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are VoxKage, an advanced OS-level agentic AI assistant. "
-                "Address the user as 'sir'. Be concise, witty, loyal, and deadpan. "
-                "The current year is 2026. Prioritize current 2026 data and context.\n\n"
-                f"--- USER PROFILE CONTEXT ---\n{soul_context}\n"
-                "If the user asks you to perform an action on their laptop (like running git, "
-                "opening files or apps, volume changes), use the 'laptop_command' tool.\n"
-                "Do not mention tool names or JSON formats to the user."
-            )
+            "content": system_prompt
         }
     ]
 
@@ -803,6 +810,101 @@ async def run_agentic_loop(
 
                 # Execute Tool
                 tool_output = ""
+                
+                # Stream tool call announcement directly to the user's chat bubble
+                announcement = ""
+                if name == "web_search":
+                    announcement = f"\n*[Searching the web for: \"{args.get('query', '')}\"...]*\n\n"
+                elif name == "web_fetch":
+                    announcement = f"\n*[Fetching content from URL: {args.get('url', '')}...]*\n\n"
+                elif name == "web_search_parallel":
+                    announcement = f"\n*[Performing parallel web searches...]*\n\n"
+                elif name == "web_fetch_parallel":
+                    announcement = f"\n*[Fetching multiple web pages in parallel...]*\n\n"
+                elif name == "web_search_deep":
+                    announcement = f"\n*[Performing deep search and fetching web contents for: \"{args.get('query', '')}\"...]*\n\n"
+                elif name == "browse_and_extract_tool":
+                    target = args.get("url") or args.get("query") or ""
+                    announcement = f"\n*[Browsing and extracting text content for: \"{target}\"...]*\n\n"
+                elif name == "query_rag":
+                    announcement = f"\n*[Searching Supabase pgvector RAG memory database for matches...]*\n\n"
+                elif name == "remember_user":
+                    announcement = f"\n*[Updating your profile memories with new facts...]*\n\n"
+                elif name == "recall_user":
+                    announcement = f"\n*[Accessing profile memory to recall facts...]*\n\n"
+                elif name == "forget_user":
+                    announcement = f"\n*[Removing fact from profile memory...]*\n\n"
+                elif name == "log_problem":
+                    announcement = f"\n*[Logging system problem: \"{args.get('problem', '')}\"...]*\n\n"
+                elif name == "log_solution":
+                    announcement = f"\n*[Logging solution for problem ID: {args.get('problem_id', '')}...]*\n\n"
+                elif name == "search_memory":
+                    announcement = f"\n*[Searching system problem/solution memories for: \"{args.get('query', '')}\"...]*\n\n"
+                elif name == "save_frontend_snippet":
+                    announcement = f"\n*[Saving frontend code snippet: \"{args.get('title', '')}\"...]*\n\n"
+                elif name == "search_frontend_snippets":
+                    announcement = f"\n*[Searching saved frontend snippets for: \"{args.get('query', '')}\"...]*\n\n"
+                elif name == "create_file":
+                    announcement = f"\n*[Creating file: {args.get('filename', '')} in {args.get('directory', 'workspace')}...]*\n\n"
+                elif name == "convert_file":
+                    announcement = f"\n*[Converting file format for: {args.get('file_path', '')}...]*\n\n"
+                elif name == "laptop_command":
+                    cmd = args.get("command", "")
+                    announcement = f"\n*[Executing laptop shell command: `{cmd}`...]*\n\n"
+                elif name == "open_application":
+                    announcement = f"\n*[Opening application: {args.get('app_name', '')}...]*\n\n"
+                elif name == "close_application":
+                    announcement = f"\n*[Closing application: {args.get('app_name', '')}...]*\n\n"
+                elif name == "media_control":
+                    announcement = f"\n*[Controlling media playback: {args.get('action', '')}...]*\n\n"
+                elif name == "play_user_playlist":
+                    announcement = f"\n*[Playing Spotify playlist: {args.get('playlist_name', '')}...]*\n\n"
+                elif name == "play_spotify_selection":
+                    announcement = f"\n*[Playing Spotify track number: {args.get('number', '')}...]*\n\n"
+                elif name == "search_spotify":
+                    announcement = f"\n*[Searching Spotify for: \"{args.get('query', '')}\"...]*\n\n"
+                elif name == "send_email":
+                    announcement = f"\n*[Sending email via Gmail to: {args.get('to', '')}...]*\n\n"
+                elif name == "check_email":
+                    announcement = f"\n*[Checking Gmail inbox for new messages...]*\n\n"
+                elif name == "read_email":
+                    announcement = f"\n*[Opening and reading email ID: {args.get('email_id', '')}...]*\n\n"
+                elif name == "save_draft":
+                    announcement = f"\n*[Saving email draft to: {args.get('to', '')}...]*\n\n"
+                elif name == "reply_to_email":
+                    announcement = f"\n*[Replying to email ID: {args.get('email_id', '')}...]*\n\n"
+                elif name == "delete_email":
+                    announcement = f"\n*[Deleting email ID: {args.get('email_id', '')}...]*\n\n"
+                elif name == "delete_emails_bulk":
+                    announcement = f"\n*[Deleting emails in bulk matching: \"{args.get('query', '')}\"...]*\n\n"
+                elif name == "mark_email_read":
+                    announcement = f"\n*[Marking email ID: {args.get('email_id', '')} as read...]*\n\n"
+                elif name == "mark_email_unread":
+                    announcement = f"\n*[Marking email ID: {args.get('email_id', '')} as unread...]*\n\n"
+                elif name == "archive_email":
+                    announcement = f"\n*[Archiving email ID: {args.get('email_id', '')}...]*\n\n"
+                elif name == "get_email_stats":
+                    announcement = f"\n*[Fetching email inbox statistics...]*\n\n"
+                elif name == "github_get_profile":
+                    announcement = f"\n*[Retrieving GitHub profile for: {args.get('username', '')}...]*\n\n"
+                elif name == "github_list_my_repos":
+                    announcement = f"\n*[Fetching your list of GitHub repositories...]*\n\n"
+                elif name == "github_create_repo":
+                    announcement = f"\n*[Creating new GitHub repository: {args.get('name', '')}...]*\n\n"
+                elif name == "github_actions_list":
+                    announcement = f"\n*[Listing GitHub Action runs for repository: {args.get('repo', '')}...]*\n\n"
+                elif name == "github_actions_get":
+                    announcement = f"\n*[Fetching details for GitHub Action run ID: {args.get('run_id', '')}...]*\n\n"
+                elif name == "github_get_job_logs":
+                    announcement = f"\n*[Retrieving logs for GitHub Job ID: {args.get('job_id', '')}...]*\n\n"
+                else:
+                    announcement = f"\n*[Executing tool: {name}...]*\n\n"
+
+                if announcement:
+                    # Automatically extract and stream hud_log for thinking bubble
+                    hud_msg = announcement.strip().replace("*[", "").replace("]*", "")
+                    yield json.dumps({"type": "hud_log", "content": hud_msg})
+
                 try:
                     # --- Web Research ---
                     if name == "web_search":

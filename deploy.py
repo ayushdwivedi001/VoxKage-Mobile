@@ -1,5 +1,11 @@
 import os
 import sys
+import socket
+
+# Force IPv4 to bypass Jio/Airtel IPv6 SNI connection resets when talking to huggingface.co
+orig_getaddrinfo = socket.getaddrinfo
+socket.getaddrinfo = lambda host, port, family=0, *args, **kwargs: orig_getaddrinfo(host, port, socket.AF_INET, *args, **kwargs)
+
 from huggingface_hub import HfApi
 
 # Try loading from .env

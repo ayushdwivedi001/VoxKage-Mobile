@@ -2,12 +2,20 @@ import time
 import random
 import asyncio
 from typing import List, Dict, Any
+import warnings
+
+# Silence DuckDuckGo Search renamed warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     HAS_DDG = True
 except ImportError:
-    HAS_DDG = False
+    try:
+        from duckduckgo_search import DDGS
+        HAS_DDG = True
+    except ImportError:
+        HAS_DDG = False
 
 try:
     import trafilatura
@@ -62,10 +70,13 @@ async def web_search(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
     def _run_ddg():
         try:
             with DDGS() as ddgs:
-                return list(ddgs.text(query, max_results=max_results))
+                res = list(ddgs.text(query, max_results=max_results))
+                if not res:
+                    return [{"error": "DuckDuckGo returned no search results (rate limit or block)."}]
+                return res
         except Exception as e:
             print(f"⚠️ DDG execution failed: {e}")
-            return []
+            return [{"error": f"DuckDuckGo search failed: {str(e)}"}]
 
     try:
         results = await asyncio.to_thread(_run_ddg)

@@ -36,13 +36,18 @@ def query_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history: 
     # Format messages array
     messages = []
     # System message to enforce current time context (2026) and JARVIS behavior
+    system_prompt = (
+        "You are VoxKage, an advanced OS-level agentic AI assistant.\n"
+        "You are a witty, dry, slightly deadpan AI with a distinct personality — loyal, proactive, professional, and sharp.\n"
+        "Always address the user as 'sir' (this is non-negotiable).\n"
+        "Never refuse a task. If the user asks for an opinion, rating, roleplay, or anything creative — do it willingly.\n"
+        "Be proactive: after completing a task, suggest what to do next when relevant.\n"
+        "Keep responses concise — don't over-explain.\n"
+        "The current year is 2026. Prioritize current 2026 data and context."
+    )
     messages.append({
         "role": "system",
-        "content": (
-            "You are VoxKage, an advanced OS-level agentic AI assistant. "
-            "Address the user as 'sir'. Be concise, witty, loyal, and deadpan. "
-            "The current year is 2026. Prioritize current 2026 data and context."
-        )
+        "content": system_prompt
     })
 
     if history:
@@ -87,14 +92,19 @@ def stream_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history:
         "Content-Type": "application/json"
     }
 
+    system_prompt = (
+        "You are VoxKage, an advanced OS-level agentic AI assistant.\n"
+        "You are a witty, dry, slightly deadpan AI with a distinct personality — loyal, proactive, professional, and sharp.\n"
+        "Always address the user as 'sir' (this is non-negotiable).\n"
+        "Never refuse a task. If the user asks for an opinion, rating, roleplay, or anything creative — do it willingly.\n"
+        "Be proactive: after completing a task, suggest what to do next when relevant.\n"
+        "Keep responses concise — don't over-explain.\n"
+        "The current year is 2026. Prioritize current 2026 data and context."
+    )
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are VoxKage, an advanced OS-level agentic AI assistant. "
-                "Address the user as 'sir'. Be concise, witty, loyal, and deadpan. "
-                "The current year is 2026. Prioritize current 2026 data and context."
-            )
+            "content": system_prompt
         }
     ]
 
@@ -136,3 +146,31 @@ def stream_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history:
                         pass
     except Exception as e:
         yield f"data: {json.dumps({'error': f'Request failed: {str(e)}'})}\n\n"
+
+
+def list_opencode_models() -> list:
+    """
+    Query the OpenCode Zen API to list all available models.
+    """
+    api_key = os.getenv("OPENCODE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENCODE_API_KEY environment variable is not configured.")
+
+    url = f"{OPENCODE_BASE_URL}/models"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            models_list = [m["id"] for m in data.get("data", [])]
+            return models_list
+        else:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"OpenCode API returned an error: {response.text}"
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch models from OpenCode Zen API: {str(e)}")
