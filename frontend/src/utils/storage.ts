@@ -16,18 +16,26 @@ export const storage = {
       } else {
         url = await SecureStore.getItemAsync(BACKEND_URL_KEY) || '';
       }
+      url = url.trim();
+      if (url.startsWith('http://') && url.includes('.hf.space')) {
+        url = url.replace('http://', 'https://');
+      }
       return url || DEFAULT_BACKEND_URL;
-    } catch (e) {
+    } catch {
       return DEFAULT_BACKEND_URL;
     }
   },
 
   async setBackendUrl(url: string): Promise<void> {
     try {
+      let cleaned = url.trim().replace(/\/$/, '');
+      if (cleaned.startsWith('http://') && cleaned.includes('.hf.space')) {
+        cleaned = cleaned.replace('http://', 'https://');
+      }
       if (Platform.OS === 'web') {
-        localStorage.setItem(BACKEND_URL_KEY, url);
+        localStorage.setItem(BACKEND_URL_KEY, cleaned);
       } else {
-        await SecureStore.setItemAsync(BACKEND_URL_KEY, url);
+        await SecureStore.setItemAsync(BACKEND_URL_KEY, cleaned);
       }
     } catch (e) {
       console.error('Error saving backend URL', e);
@@ -41,7 +49,7 @@ export const storage = {
       } else {
         return await SecureStore.getItemAsync(TOKEN_KEY);
       }
-    } catch (e) {
+    } catch {
       return null;
     }
   },
@@ -65,7 +73,7 @@ export const storage = {
       } else {
         return await SecureStore.getItemAsync(EMAIL_KEY);
       }
-    } catch (e) {
+    } catch {
       return null;
     }
   },

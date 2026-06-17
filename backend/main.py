@@ -13,7 +13,8 @@ from auth import (
 )
 from database import (
     create_session, list_sessions, get_session, update_session_name, delete_session,
-    log_message, get_session_messages, save_playground_project, list_projects, get_project
+    log_message, get_session_messages, save_playground_project, list_projects, get_project,
+    delete_playground_project
 )
 from file_handler import save_upload, delete_file, UPLOAD_DIR
 from rag_engine import index_file_in_rag
@@ -237,6 +238,13 @@ class MasterLoginRequest(BaseModel):
     email: EmailStr
     master_key: str
 
+class SaveProjectRequest(BaseModel):
+    name: str
+    html: str = ""
+    css: str = ""
+    js: str = ""
+    project_id: str | None = None
+
 @app.post("/auth/master-login")
 def master_login(req: MasterLoginRequest):
     """
@@ -289,18 +297,18 @@ def get_projects(user: str = Depends(get_current_user)):
 
 @app.post("/projects")
 def save_project(
-    name: str, 
-    html: str = "", 
-    css: str = "", 
-    js: str = "", 
-    project_id: str | None = None, 
+    req: SaveProjectRequest,
     user: str = Depends(get_current_user)
 ):
-    return save_playground_project(user, project_id, name, html, css, js)
+    return save_playground_project(user, req.project_id, req.name, req.html, req.css, req.js)
 
 @app.get("/projects/{project_id}")
 def get_single_project(project_id: str, user: str = Depends(get_current_user)):
     return get_project(project_id, user)
+
+@app.delete("/projects/{project_id}")
+def delete_single_project(project_id: str, user: str = Depends(get_current_user)):
+    return delete_playground_project(project_id, user)
 
 @app.get("/models")
 def get_models(user: str = Depends(get_current_user)):
@@ -361,6 +369,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
             payload_data = json.loads(data)
             query = payload_data.get("message", "").strip()
             model_key = payload_data.get("model", "deepseek-flash")
+            active_project = payload_data.get("active_project", None)
 
             if not query:
                 continue
@@ -381,7 +390,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 session_id=session_id,
                 model_key=model_key,
                 history=formatted_history,
-                manager_ref=manager
+                manager_ref=manager,
+                active_project=active_project
             )
             
             async for chunk_sse in async_generator:

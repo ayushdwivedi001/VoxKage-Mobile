@@ -9,7 +9,7 @@ export default function RootLayout() {
       <View style={styles.webContainer}>
         <StatusBar style="light" />
         <View style={styles.phoneFrame}>
-          <View style={styles.statusBarMock}>
+          <View style={[styles.statusBarMock, { pointerEvents: 'none' as any }]}>
             <View style={styles.notchMock} />
           </View>
           <View style={styles.screenContent}>
@@ -18,7 +18,7 @@ export default function RootLayout() {
               <Stack.Screen name="login" />
             </Stack>
           </View>
-          <View style={styles.homeIndicatorMock} />
+          <View style={[styles.homeIndicatorMock, { pointerEvents: 'none' as any }]} />
         </View>
       </View>
     );

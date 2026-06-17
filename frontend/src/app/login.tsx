@@ -17,6 +17,40 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import { storage, DEFAULT_BACKEND_URL } from '@/utils/storage';
 
+const sanitizeUrl = (url: string): string => {
+  let cleaned = url.trim().replace(/\/$/, '');
+  if (cleaned.startsWith('http://') && cleaned.includes('.hf.space')) {
+    cleaned = cleaned.replace('http://', 'https://');
+  }
+  return cleaned;
+};
+
+// Custom Gradient Bluish-Black V Logo SVG (No Box)
+const LogoV = () => (
+  <Svg width={80} height={80} viewBox="0 0 100 100" style={styles.logoSvg}>
+    <Defs>
+      <SvgGradient id="logoGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+        <Stop offset="0%" stopColor="#3b82f6" stopOpacity={0.9} />
+        <Stop offset="50%" stopColor="#2563eb" stopOpacity={0.9} />
+        <Stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.9} />
+      </SvgGradient>
+      <SvgGradient id="logoGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
+        <Stop offset="0%" stopColor="#1d4ed8" stopOpacity={0.9} />
+        <Stop offset="50%" stopColor="#0f172a" stopOpacity={0.9} />
+        <Stop offset="100%" stopColor="#020617" stopOpacity={0.9} />
+      </SvgGradient>
+    </Defs>
+    <Path
+      d="M20 18 L46 82 L56 82 L32 18 Z"
+      fill="url(#logoGrad1)"
+    />
+    <Path
+      d="M80 18 L54 82 L44 82 L68 18 Z"
+      fill="url(#logoGrad2)"
+    />
+  </Svg>
+);
+
 export default function LoginScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -27,6 +61,14 @@ export default function LoginScreen() {
   const [isOtpSent, setIsOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}: ${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -43,31 +85,7 @@ export default function LoginScreen() {
     loadSettings();
   }, []);
 
-  // Custom Gradient Bluish-Black V Logo SVG (No Box)
-  const LogoV = () => (
-    <Svg width={80} height={80} viewBox="0 0 100 100" style={styles.logoSvg}>
-      <Defs>
-        <SvgGradient id="logoGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <Stop offset="0%" stopColor="#3b82f6" stopOpacity={0.9} />
-          <Stop offset="50%" stopColor="#2563eb" stopOpacity={0.9} />
-          <Stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.9} />
-        </SvgGradient>
-        <SvgGradient id="logoGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
-          <Stop offset="0%" stopColor="#1d4ed8" stopOpacity={0.9} />
-          <Stop offset="50%" stopColor="#0f172a" stopOpacity={0.9} />
-          <Stop offset="100%" stopColor="#020617" stopOpacity={0.9} />
-        </SvgGradient>
-      </Defs>
-      <Path
-        d="M20 18 L46 82 L56 82 L32 18 Z"
-        fill="url(#logoGrad1)"
-      />
-      <Path
-        d="M80 18 L54 82 L44 82 L68 18 Z"
-        fill="url(#logoGrad2)"
-      />
-    </Svg>
-  );
+
 
   const getFetchHeaders = () => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -80,18 +98,18 @@ export default function LoginScreen() {
 
   const handleRequestOtp = async () => {
     if (!email.trim() || !email.includes('@')) {
-      Alert.alert('Error', 'Please enter a valid email address.');
+      showAlert('Error', 'Please enter a valid email address.');
       return;
     }
 
     if (isSignUp && !masterKey.trim()) {
-      Alert.alert('Error', 'Master Key is required for new signups.');
+      showAlert('Error', 'Master Key is required for new signups.');
       return;
     }
 
     setLoading(true);
     try {
-      const savedUrl = backendUrl.trim().replace(/\/$/, '');
+      const savedUrl = sanitizeUrl(backendUrl);
       await storage.setBackendUrl(savedUrl);
       await storage.setEmail(email.trim());
 
@@ -107,7 +125,7 @@ export default function LoginScreen() {
       const data = await response.json();
       if (response.ok) {
         setIsOtpSent(true);
-        Alert.alert(
+        showAlert(
           'OTP Sent',
           data.message || 'OTP verification code sent successfully to your email.'
         );
@@ -116,7 +134,7 @@ export default function LoginScreen() {
         if (response.status === 404) {
           triggerOfflineBypassAlert('Endpoint returned 404. This happens if your Hugging Face Space is private or still booting. Would you like to enter Offline Simulator Mode, Sir?');
         } else {
-          Alert.alert('Authentication Failed', data.detail || 'Failed to request OTP.');
+          showAlert('Authentication Failed', data.detail || 'Failed to request OTP.');
         }
       }
     } catch (e: any) {
@@ -127,32 +145,41 @@ export default function LoginScreen() {
   };
 
   const triggerOfflineBypassAlert = (msg: string) => {
-    Alert.alert(
-      'Server Connection Failed',
-      msg,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Enter Simulator Mode',
-          onPress: async () => {
-            await storage.setToken('mock-authorized-jwt-sir');
-            await storage.setEmail(email || 'sir@voxkage.ai');
-            router.replace('/');
+    const enterSimulator = async () => {
+      await storage.setToken('mock-authorized-jwt-sir');
+      await storage.setEmail(email || 'sir@voxkage.ai');
+      router.replace('/');
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`${msg}\n\nClick OK to enter Simulator Mode, or Cancel to retry.`);
+      if (confirmed) {
+        enterSimulator();
+      }
+    } else {
+      Alert.alert(
+        'Server Connection Failed',
+        msg,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Enter Simulator Mode',
+            onPress: enterSimulator,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const handleVerifyOtp = async () => {
     if (!otp.trim()) {
-      Alert.alert('Error', 'Please enter the verification code.');
+      showAlert('Error', 'Please enter the verification code.');
       return;
     }
 
     setLoading(true);
     try {
-      const savedUrl = backendUrl.trim().replace(/\/$/, '');
+      const savedUrl = sanitizeUrl(backendUrl);
       const response = await fetch(`${savedUrl}/auth/otp/verify`, {
         method: 'POST',
         headers: getFetchHeaders(),
@@ -167,10 +194,10 @@ export default function LoginScreen() {
         await storage.setToken(data.access_token);
         router.replace('/');
       } else {
-        Alert.alert('Verification Failed', data.detail || 'Invalid or expired OTP code.');
+        showAlert('Verification Failed', data.detail || 'Invalid or expired OTP code.');
       }
     } catch (e: any) {
-      Alert.alert('Connection Error', `Could not connect to backend: ${e.message}`);
+      showAlert('Connection Error', `Could not connect to backend: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -178,17 +205,17 @@ export default function LoginScreen() {
 
   const handleDeveloperLogin = async () => {
     if (!email.trim() || !email.includes('@')) {
-      Alert.alert('Error', 'Please enter a valid email address.');
+      showAlert('Error', 'Please enter a valid email address.');
       return;
     }
     if (!masterKey.trim()) {
-      Alert.alert('Error', 'Please enter the Master Passphrase.');
+      showAlert('Error', 'Please enter the Master Passphrase.');
       return;
     }
 
     setLoading(true);
     try {
-      const savedUrl = backendUrl.trim().replace(/\/$/, '') || DEFAULT_BACKEND_URL;
+      const savedUrl = sanitizeUrl(backendUrl) || DEFAULT_BACKEND_URL;
       await storage.setBackendUrl(savedUrl);
       await storage.setEmail(email.trim());
 
@@ -206,10 +233,10 @@ export default function LoginScreen() {
         await storage.setToken(data.access_token);
         router.replace('/');
       } else {
-        Alert.alert('Developer Login Failed', data.detail || 'Master Passphrase verification failed.');
+        showAlert('Developer Login Failed', data.detail || 'Master Passphrase verification failed.');
       }
     } catch (e: any) {
-      Alert.alert('Connection Error', `Could not connect to backend: ${e.message}`);
+      showAlert('Connection Error', `Could not connect to backend: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -218,7 +245,7 @@ export default function LoginScreen() {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
-      const savedUrl = backendUrl.trim().replace(/\/$/, '') || DEFAULT_BACKEND_URL;
+      const savedUrl = sanitizeUrl(backendUrl) || DEFAULT_BACKEND_URL;
       await storage.setBackendUrl(savedUrl);
       
       const response = await fetch(`${savedUrl}/auth/master-login`, {

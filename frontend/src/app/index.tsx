@@ -26,6 +26,7 @@ import { storage } from '@/utils/storage';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const drawerWidth = Platform.OS === 'web' ? 366 : screenWidth;
 
 interface ChatMessage {
   id: string;
@@ -39,6 +40,38 @@ interface ChatSession {
   name: string;
   created_at: string;
 }
+
+// Gradient V Logo SVG (No box, clean geometric layered ribbons)
+const LogoV = ({ size = 64 }: { size?: number }) => (
+  <Svg width={size} height={size} viewBox="0 0 100 100">
+    <Defs>
+      <SvgGradient id="logoGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+        <Stop offset="0%" stopColor="#3b82f6" stopOpacity={0.9} />
+        <Stop offset="50%" stopColor="#2563eb" stopOpacity={0.9} />
+        <Stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.9} />
+      </SvgGradient>
+      <SvgGradient id="logoGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
+        <Stop offset="0%" stopColor="#1d4ed8" stopOpacity={0.9} />
+        <Stop offset="50%" stopColor="#0f172a" stopOpacity={0.9} />
+        <Stop offset="100%" stopColor="#020617" stopOpacity={0.9} />
+      </SvgGradient>
+    </Defs>
+    <Path
+      d="M20 18 L46 82 L56 82 L32 18 Z"
+      fill="url(#logoGrad1)"
+    />
+    <Path
+      d="M80 18 L54 82 L44 82 L68 18 Z"
+      fill="url(#logoGrad2)"
+    />
+  </Svg>
+);
+
+
+
+const generateRandomId = (prefix: string = 'rand'): string => {
+  return `${prefix}-${Math.floor(Math.random() * 10000000)}`;
+};
 
 export default function ChatScreen() {
   const [token, setToken] = useState<string | null>(null);
@@ -66,6 +99,7 @@ export default function ChatScreen() {
   // Inline Sidebar Session Rename State
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
+  const [sessionToDelete, setSessionToDelete] = useState<{ id: string; name: string } | null>(null);
 
   // UI Toggles & Controls
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -76,21 +110,49 @@ export default function ChatScreen() {
   const [playgroundCss, setPlaygroundCss] = useState('');
   const [playgroundJs, setPlaygroundJs] = useState('');
   const [playgroundProjectName, setPlaygroundProjectName] = useState('New Live App');
+  const [playgroundProjectId, setPlaygroundProjectId] = useState<string | null>(null);
+  const [playgroundRevision, setPlaygroundRevision] = useState(0);
+  const [activeEditingProjectId, setActiveEditingProjectId] = useState<string | null>(null);
+
+  // Playground list state
+  const [projects, setProjects] = useState<any[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [projectToRename, setProjectToRename] = useState<{ id: string; name: string } | null>(null);
+  const [renameProjectName, setRenameProjectName] = useState('');
+  const [playgroundView, setPlaygroundView] = useState<'list' | 'preview'>('list');
 
   // Animated Drawers
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isPlaygroundOpen, setIsPlaygroundOpen] = useState(false);
   const [showSidebarSettings, setShowSidebarSettings] = useState(false);
 
-  const sidebarAnim = useRef(new Animated.Value(-280)).current;
-  const playgroundAnim = useRef(new Animated.Value(screenWidth)).current;
+  const [sidebarAnim] = useState(() => new Animated.Value(-280));
+  const [playgroundAnim] = useState(() => new Animated.Value(drawerWidth));
 
   // Border lit up entrance animation
-  const borderGlowAnim = useRef(new Animated.Value(0)).current;
+  const [borderGlowAnim] = useState(() => new Animated.Value(0));
 
   // References
   const wsRef = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList | null>(null);
+  const activeEditingProjectIdRef = useRef<string | null>(null);
+  const projectsRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    activeEditingProjectIdRef.current = activeEditingProjectId;
+  }, [activeEditingProjectId]);
+
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}: ${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -139,8 +201,12 @@ export default function ChatScreen() {
           { id: 'mock-1', name: 'Mock Live Dashboard Preview', created_at: '2026-06-17' },
           { id: 'mock-2', name: 'System Volume command log', created_at: '2026-06-17' },
         ]);
+        setProjects([
+          { id: 'mock-p1', name: 'Todo App responsive preview', html: '<h1>Todo App responsive preview</h1>', css: '', js: '' }
+        ]);
       } else {
         loadSessions(storedUrl, storedToken);
+        loadProjects(storedUrl, storedToken);
       }
     };
     checkAuth();
@@ -273,31 +339,7 @@ window.onresize = () => {
 </html>
   `;
 
-  // Gradient V Logo SVG (No box, clean geometric layered ribbons)
-  const LogoV = ({ size = 64 }: { size?: number }) => (
-    <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Defs>
-        <SvgGradient id="logoGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <Stop offset="0%" stopColor="#3b82f6" stopOpacity={0.9} />
-          <Stop offset="50%" stopColor="#2563eb" stopOpacity={0.9} />
-          <Stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.9} />
-        </SvgGradient>
-        <SvgGradient id="logoGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
-          <Stop offset="0%" stopColor="#1d4ed8" stopOpacity={0.9} />
-          <Stop offset="50%" stopColor="#0f172a" stopOpacity={0.9} />
-          <Stop offset="100%" stopColor="#020617" stopOpacity={0.9} />
-        </SvgGradient>
-      </Defs>
-      <Path
-        d="M20 18 L46 82 L56 82 L32 18 Z"
-        fill="url(#logoGrad1)"
-      />
-      <Path
-        d="M80 18 L54 82 L44 82 L68 18 Z"
-        fill="url(#logoGrad2)"
-      />
-    </Svg>
-  );
+
 
   const formatModelName = (modelId: string) => {
     if (modelId === 'deepseek-v4-flash-free') return 'DeepSeek Flash (Free)';
@@ -309,7 +351,7 @@ window.onresize = () => {
       .join(' ');
   };
 
-  const fetchModels = async (url: string, jwtToken: string) => {
+  async function fetchModels(url: string, jwtToken: string) {
     if (jwtToken.startsWith('mock-')) {
       // Mock models list in simulation mode
       setModels(['deepseek-v4-flash-free', 'gemini-2.5-flash', 'claude-3.5-sonnet', 'openai-gpt-4o']);
@@ -332,9 +374,9 @@ window.onresize = () => {
     } catch (e) {
       console.error('Failed to fetch models from API', e);
     }
-  };
+  }
 
-  const loadSessions = async (url: string, jwtToken: string) => {
+  async function loadSessions(url: string, jwtToken: string) {
     try {
       const response = await fetch(`${url}/sessions`, {
         headers: { Authorization: `Bearer ${jwtToken}` },
@@ -346,11 +388,165 @@ window.onresize = () => {
     } catch (e) {
       console.error('Failed to load sessions', e);
     }
+  }
+
+  async function loadProjects(url: string, jwtToken: string) {
+    setIsLoadingProjects(true);
+    try {
+      const response = await fetch(`${url}/projects`, {
+        headers: { Authorization: `Bearer ${jwtToken}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setProjects(data);
+      }
+    } catch (e) {
+      console.error('Failed to load projects', e);
+    } finally {
+      setIsLoadingProjects(false);
+    }
+  }
+
+  const handleSaveProject = async (name: string, html: string, css: string, js: string, projectId: string | null = null) => {
+    if (token?.startsWith('mock-')) {
+      const newMockId = projectId || generateRandomId('mock-p');
+      const newProj = { id: newMockId, name, html, css, js };
+      setProjects((prev) => {
+        const filtered = prev.filter((p) => p.id !== newMockId);
+        return [newProj, ...filtered];
+      });
+      setPlaygroundProjectId(newMockId);
+      setPlaygroundProjectName(name);
+      return newMockId;
+    }
+
+    if (!token || !backendUrl) return null;
+    
+    // Clean and sanitise targetUrl
+    let targetUrl = backendUrl.trim().replace(/\/$/, '');
+    if (targetUrl.startsWith('http://') && targetUrl.includes('.hf.space')) {
+      targetUrl = targetUrl.replace('http://', 'https://');
+    }
+
+    try {
+      const response = await fetch(`${targetUrl}/projects`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name,
+          html,
+          css,
+          js,
+          project_id: projectId || null,
+        }),
+      });
+      if (response.ok) {
+        const savedProj = await response.json();
+        setProjects((prev) => {
+          const filtered = prev.filter((p) => p.id !== savedProj.id);
+          return [savedProj, ...filtered];
+        });
+        setPlaygroundProjectId(savedProj.id);
+        setPlaygroundProjectName(savedProj.name);
+        return savedProj.id;
+      }
+    } catch (e) {
+      console.error('Failed to save project', e);
+      showAlert('Connection Warning', 'Unable to sync preview with the cloud. Running locally, Sir.');
+    }
+    return null;
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    if (token?.startsWith('mock-')) {
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      if (playgroundProjectId === projectId) {
+        setPlaygroundHtml('<h1>No live preview compiled yet, Sir.</h1>');
+        setPlaygroundCss('');
+        setPlaygroundJs('');
+        setPlaygroundProjectName('New Live App');
+        setPlaygroundProjectId(null);
+      }
+      return;
+    }
+
+    if (!token || !backendUrl) return;
+    try {
+      const response = await fetch(`${backendUrl}/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setProjects((prev) => prev.filter((p) => p.id !== projectId));
+        if (playgroundProjectId === projectId) {
+          setPlaygroundHtml('<h1>No live preview compiled yet, Sir.</h1>');
+          setPlaygroundCss('');
+          setPlaygroundJs('');
+          setPlaygroundProjectName('New Live App');
+          setPlaygroundProjectId(null);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to delete project', e);
+      showAlert('Error', 'Failed to delete preview, Sir.');
+    }
+  };
+
+  const handleRenameProject = async (projectId: string, newName: string) => {
+    if (!newName.trim()) return;
+    if (token?.startsWith('mock-')) {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectId ? { ...p, name: newName } : p))
+      );
+      if (playgroundProjectId === projectId) {
+        setPlaygroundProjectName(newName);
+      }
+      setProjectToRename(null);
+      return;
+    }
+
+    if (!token || !backendUrl) return;
+    const original = projects.find((p) => p.id === projectId);
+    if (!original) return;
+
+    try {
+      const response = await fetch(`${backendUrl}/projects`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: newName,
+          html: original.html,
+          css: original.css,
+          js: original.js,
+          project_id: projectId,
+        }),
+      });
+      if (response.ok) {
+        const savedProj = await response.json();
+        setProjects((prev) =>
+          prev.map((p) => (p.id === projectId ? savedProj : p))
+        );
+        if (playgroundProjectId === projectId) {
+          setPlaygroundProjectName(savedProj.name);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to rename project', e);
+      showAlert('Error', 'Failed to rename preview, Sir.');
+    } finally {
+      setProjectToRename(null);
+    }
   };
 
   const createNewSession = async () => {
     if (token?.startsWith('mock-')) {
-      const newMockId = `mock-${Math.random()}`;
+      const newMockId = generateRandomId('mock');
       const newMockSession: ChatSession = {
         id: newMockId,
         name: 'New Chat',
@@ -378,50 +574,46 @@ window.onresize = () => {
         closeSidebar();
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to create new session, Sir.');
+      showAlert('Error', 'Failed to create new session, Sir.');
     }
   };
 
-  const deleteSession = async (sessionId: string) => {
-    Alert.alert(
-      'Delete Session',
-      'Are you sure you want to delete this chat session, Sir?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            if (token?.startsWith('mock-')) {
-              setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-              if (currentSessionId === sessionId) {
-                setMessages([]);
-                setCurrentSessionId(null);
-                setIsNewChat(true);
-              }
-              return;
-            }
+  const deleteSession = (sessionId: string) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (session) {
+      setSessionToDelete({ id: session.id, name: session.name });
+    }
+  };
 
-            try {
-              const response = await fetch(`${backendUrl}/sessions/${sessionId}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              if (response.ok) {
-                setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-                if (currentSessionId === sessionId) {
-                  setMessages([]);
-                  setCurrentSessionId(null);
-                  setIsNewChat(true);
-                }
-              }
-            } catch (e) {
-              Alert.alert('Error', 'Failed to delete session, Sir.');
-            }
-          },
-        },
-      ]
-    );
+  const executeDeleteSession = async (sessionId: string) => {
+    if (token?.startsWith('mock-')) {
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (currentSessionId === sessionId) {
+        setMessages([]);
+        setCurrentSessionId(null);
+        setIsNewChat(true);
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendUrl}/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+        if (currentSessionId === sessionId) {
+          setMessages([]);
+          setCurrentSessionId(null);
+          setIsNewChat(true);
+        }
+      } else {
+        showAlert('Error', 'Failed to delete session, Sir.');
+      }
+    } catch (e) {
+      showAlert('Error', 'Failed to delete session, Sir.');
+    }
   };
 
   // Side Panel rename function
@@ -446,11 +638,11 @@ window.onresize = () => {
           prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s))
         );
       } else {
-        Alert.alert('Error', 'Failed to rename session, Sir.');
+        showAlert('Error', 'Failed to rename session, Sir.');
       }
     } catch (e) {
       console.error(e);
-      Alert.alert('Error', 'Connection failure renaming session, Sir.');
+      showAlert('Error', 'Connection failure renaming session, Sir.');
     } finally {
       setEditingSessionId(null);
     }
@@ -508,7 +700,7 @@ window.onresize = () => {
         connectWebSocket(sessionId, token || '', backendUrl);
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to fetch session messages, Sir.');
+      showAlert('Error', 'Failed to fetch session messages, Sir.');
     } finally {
       setLoading(false);
       closeSidebar();
@@ -543,7 +735,7 @@ window.onresize = () => {
             } else {
               return [
                 ...prev,
-                { id: `log-${Math.random()}`, role: 'laptop' as const, content: data.content },
+                { id: generateRandomId('log'), role: 'laptop' as const, content: data.content },
               ];
             }
           });
@@ -557,9 +749,44 @@ window.onresize = () => {
               setMessages((prev) => {
                 const updated = [
                   ...prev,
-                  { id: `assistant-${Math.random()}`, role: 'assistant' as const, content: currText },
+                  { id: generateRandomId('assistant'), role: 'assistant' as const, content: currText },
                 ];
                 scanMessagesForPlayground(updated);
+
+                // Auto-save code block updates to the active editing project if refining
+                const editingId = activeEditingProjectIdRef.current;
+                if (editingId) {
+                  const htmlMatch = currText.match(/```html\n([\s\S]*?)```/i);
+                  const cssMatch = currText.match(/```css\n([\s\S]*?)```/i);
+                  const jsMatch = currText.match(/```javascript\n([\s\S]*?)```/i) || currText.match(/```js\n([\s\S]*?)```/i);
+                  
+                  if (htmlMatch || cssMatch || jsMatch) {
+                    const htmlCode = htmlMatch ? htmlMatch[1] : '';
+                    const cssCode = cssMatch ? cssMatch[1] : '';
+                    const jsCode = jsMatch ? jsMatch[1] : '';
+                    
+                    const originalProj = projectsRef.current.find(p => p.id === editingId);
+                    if (originalProj) {
+                      const finalHtml = htmlCode || originalProj.html || '';
+                      const finalCss = cssCode || originalProj.css || '';
+                      const finalJs = jsCode || originalProj.js || '';
+                      
+                      setPlaygroundHtml(finalHtml);
+                      setPlaygroundCss(finalCss);
+                      setPlaygroundJs(finalJs);
+                      setPlaygroundRevision((prev) => prev + 1);
+
+                      handleSaveProject(
+                        originalProj.name,
+                        finalHtml,
+                        finalCss,
+                        finalJs,
+                        editingId
+                      );
+                    }
+                  }
+                }
+
                 return updated;
               });
             }
@@ -595,7 +822,42 @@ window.onresize = () => {
       setPlaygroundCss(cssCode || '');
       setPlaygroundJs(jsCode || '');
       setPlaygroundProjectName('Live Preview Sandbox');
+      setPlaygroundRevision((prev) => prev + 1);
     }
+  };
+
+  const hasCodeBlocks = (text: string) => {
+    return /```html\n|```css\n|```javascript\n|```js\n/i.test(text);
+  };
+
+  const handleOpenCodeInPlayground = async (content: string) => {
+    const htmlMatch = content.match(/```html\n([\s\S]*?)```/i);
+    const cssMatch = content.match(/```css\n([\s\S]*?)```/i);
+    const jsMatch = content.match(/```javascript\n([\s\S]*?)```/i) || content.match(/```js\n([\s\S]*?)```/i);
+
+    const htmlCode = htmlMatch ? htmlMatch[1] : '<h1>Live Preview</h1>';
+    const cssCode = cssMatch ? cssMatch[1] : '';
+    const jsCode = jsMatch ? jsMatch[1] : '';
+
+    setPlaygroundHtml(htmlCode);
+    setPlaygroundCss(cssCode);
+    setPlaygroundJs(jsCode);
+    setPlaygroundRevision((prev) => prev + 1);
+
+    // Set a default project name from session or fallback
+    const session = sessions.find((s) => s.id === currentSessionId);
+    const projName = session ? `Playground - ${session.name}` : 'Playground Preview';
+    setPlaygroundProjectName(projName);
+
+    // Save project to backend
+    const savedId = await handleSaveProject(projName, htmlCode, cssCode, jsCode, playgroundProjectId);
+    if (savedId) {
+      setPlaygroundProjectId(savedId);
+    }
+    
+    // Open the drawer
+    setPlaygroundView('preview');
+    openPlayground();
   };
 
   const handleSendMessage = async () => {
@@ -608,7 +870,7 @@ window.onresize = () => {
       setIsNewChat(false);
       setMessages((prev) => [
         ...prev,
-        { id: `user-${Math.random()}`, role: 'user', content: userQuery },
+        { id: generateRandomId('user'), role: 'user', content: userQuery },
       ]);
       setStreamingText('');
 
@@ -670,19 +932,23 @@ window.onresize = () => {
           setIsNewChat(false);
           connectWebSocket(session.id, token, backendUrl);
         } else {
-          Alert.alert('Error', 'Failed to initialize session.');
+          showAlert('Error', 'Failed to initialize session.');
           return;
         }
       } catch (e) {
-        Alert.alert('Error', 'Could not initialize session.');
+        showAlert('Error', 'Could not initialize session.');
         return;
       }
     }
 
     const userQuery = inputText.trim();
+    const activeProject = activeEditingProjectId 
+      ? projects.find(p => p.id === activeEditingProjectId) 
+      : null;
+
     setMessages((prev) => [
       ...prev,
-      { id: `user-${Math.random()}`, role: 'user', content: userQuery },
+      { id: generateRandomId('user'), role: 'user', content: userQuery },
     ]);
     setInputText('');
     setLoading(true);
@@ -694,6 +960,13 @@ window.onresize = () => {
         JSON.stringify({
           message: userQuery,
           model: activeModel,
+          active_project: activeProject ? {
+            id: activeProject.id,
+            name: activeProject.name,
+            html: activeProject.html,
+            css: activeProject.css,
+            js: activeProject.js
+          } : null,
         })
       );
     } else {
@@ -704,10 +977,17 @@ window.onresize = () => {
             JSON.stringify({
               message: userQuery,
               model: activeModel,
+              active_project: activeProject ? {
+                id: activeProject.id,
+                name: activeProject.name,
+                html: activeProject.html,
+                css: activeProject.css,
+                js: activeProject.js
+              } : null,
             })
           );
         } else {
-          Alert.alert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
+          showAlert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
           setLoading(false);
           setThinkingStatus(null);
         }
@@ -719,9 +999,9 @@ window.onresize = () => {
     if (token?.startsWith('mock-')) {
       setMessages((prev) => [
         ...prev,
-        { id: `mock-file-${Math.random()}`, role: 'laptop', content: '📄 Document indexed: AyushResume.pdf\nVector RAG store updated in Supabase.' }
+        { id: generateRandomId('mock-file'), role: 'laptop', content: '📄 Document indexed: AyushResume.pdf\nVector RAG store updated in Supabase.' }
       ]);
-      Alert.alert('Mock Indexed', 'Simulator Mode: Document successfully indexed.');
+      showAlert('Mock Indexed', 'Simulator Mode: Document successfully indexed.');
       return;
     }
 
@@ -758,7 +1038,7 @@ window.onresize = () => {
 
       const data = await response.json();
       if (response.ok) {
-        Alert.alert(
+        showAlert(
           'Upload Successful',
           `Document '${fileAsset.name}' was successfully uploaded and indexed into Supabase RAG memory, Sir.`
         );
@@ -771,10 +1051,10 @@ window.onresize = () => {
           },
         ]);
       } else {
-        Alert.alert('Upload Failed', data.detail || 'Failed to process document, Sir.');
+        showAlert('Upload Failed', data.detail || 'Failed to process document, Sir.');
       }
     } catch (e: any) {
-      Alert.alert('Error', `Document upload failed: ${e.message}`);
+      showAlert('Error', `Document upload failed: ${e.message}`);
     } finally {
       setUploadingFile(false);
     }
@@ -812,6 +1092,9 @@ window.onresize = () => {
   };
 
   const openPlayground = () => {
+    if (token && backendUrl) {
+      loadProjects(backendUrl, token);
+    }
     setIsPlaygroundOpen(true);
     Animated.timing(playgroundAnim, {
       toValue: 0,
@@ -822,7 +1105,7 @@ window.onresize = () => {
 
   const closePlayground = () => {
     Animated.timing(playgroundAnim, {
-      toValue: screenWidth,
+      toValue: drawerWidth,
       duration: 220,
       useNativeDriver: false,
     }).start(() => setIsPlaygroundOpen(false));
@@ -1012,12 +1295,21 @@ window.onresize = () => {
                     <View style={styles.assistantAvatar}>
                       <LogoV size={18} />
                     </View>
-                    <View style={styles.assistantBubble}>
+                    <View style={[styles.assistantBubble, hasCodeBlocks(item.content) && { minWidth: 160 }]}>
                       <MarkdownRenderer text={item.content} />
                       {item.id === 'streaming' && (
                         <View style={styles.typingIndicatorContainer}>
                           <ActivityIndicator size="small" color="#2563eb" />
                         </View>
+                      )}
+                      {hasCodeBlocks(item.content) && (
+                        <TouchableOpacity
+                          style={styles.openPlaygroundBubbleBtn}
+                          onPress={() => handleOpenCodeInPlayground(item.content)}
+                        >
+                          <Ionicons name="play-circle-outline" size={14} color="#60a5fa" />
+                          <Text style={styles.openPlaygroundBubbleBtnText}>Open in Playground</Text>
+                        </TouchableOpacity>
                       )}
                     </View>
                   </View>
@@ -1098,6 +1390,23 @@ window.onresize = () => {
               <Ionicons name="chevron-down" size={10} color="#94a3b8" />
             </TouchableOpacity>
           </View>
+          {/* Refining HUD Bar */}
+          {activeEditingProjectId && (
+            <View style={styles.refiningHudBar}>
+              <View style={styles.refiningHudLeft}>
+                <Ionicons name="color-wand-outline" size={14} color="#60a5fa" />
+                <Text style={styles.refiningHudText} numberOfLines={1}>
+                  Refining: {projects.find(p => p.id === activeEditingProjectId)?.name || 'Untitled App'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.refiningHudCloseBtn}
+                onPress={() => setActiveEditingProjectId(null)}
+              >
+                <Ionicons name="close-circle" size={16} color="#ef4444" />
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.inputPill}>
             <TouchableOpacity
@@ -1251,12 +1560,13 @@ window.onresize = () => {
         <TouchableOpacity
           onPress={() => {
             closeSidebar();
+            setPlaygroundView('list');
             openPlayground();
           }}
           style={styles.sidebarPlaygroundBtn}
         >
           <Ionicons name="code-slash-outline" size={16} color="#2563eb" />
-          <Text style={styles.sidebarPlaygroundText}>Live Sandbox Preview</Text>
+          <Text style={styles.sidebarPlaygroundText}>Playground</Text>
         </TouchableOpacity>
 
         <Text style={styles.historyLabel}>History</Text>
@@ -1378,36 +1688,193 @@ window.onresize = () => {
       <Animated.View style={[styles.playgroundDrawer, { left: playgroundAnim }]}>
         {/* Playground Header */}
         <View style={styles.playgroundHeader}>
-          <View style={styles.playgroundTitleRow}>
-            <Ionicons name="code-slash" size={18} color="#3b82f6" />
-            <Text style={styles.playgroundTitle}>{playgroundProjectName}</Text>
-          </View>
-          <TouchableOpacity onPress={closePlayground}>
-            <Ionicons name="close-outline" size={22} color="#9ca3af" />
+          <TouchableOpacity 
+            style={styles.playgroundBackBtn}
+            onPress={() => {
+              if (playgroundView === 'preview') {
+                setPlaygroundView('list');
+              } else {
+                closePlayground();
+              }
+            }}
+          >
+            <Ionicons name="chevron-back" size={22} color="#60a5fa" />
+            <Text style={styles.playgroundBackText}>
+              {playgroundView === 'preview' ? 'Previews' : 'Chat'}
+            </Text>
           </TouchableOpacity>
-        </View>
+          
+          <View style={[styles.playgroundTitleContainer, { pointerEvents: 'none' as any }]}>
+            <Text style={styles.playgroundProjectTitle} numberOfLines={1}>
+              {playgroundView === 'preview' ? playgroundProjectName : 'Playground'}
+            </Text>
+          </View>
 
-        {/* Live Preview sandbox */}
-        <View style={styles.sandboxContainer}>
-          {Platform.OS === 'web' ? (
-            // @ts-ignore
-            <iframe
-              srcDoc={compiledSandboxHtml}
-              style={{ border: 'none', width: '100%', height: '100%', backgroundColor: '#0d0d0d' }}
-              title="Code Preview Sandbox"
-            />
+          {playgroundView === 'preview' ? (
+            <TouchableOpacity 
+              style={styles.playgroundRefineBtn}
+              onPress={() => {
+                if (playgroundProjectId) {
+                  setActiveEditingProjectId(playgroundProjectId);
+                  closePlayground();
+                }
+              }}
+            >
+              <Ionicons name="color-wand-outline" size={16} color="#60a5fa" />
+              <Text style={styles.playgroundRefineText}>Refine</Text>
+            </TouchableOpacity>
           ) : (
-            <WebView
-              originWhitelist={['*']}
-              source={{ html: compiledSandboxHtml }}
-              style={styles.webView}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              backgroundColor="#0d0d0d"
-            />
+            <View style={{ width: 60 }} />
           )}
         </View>
+
+        {/* Drawer Body content depends on playgroundView */}
+        {playgroundView === 'list' ? (
+          <View style={styles.playgroundListContainer}>
+            {isLoadingProjects ? (
+              <View style={styles.playgroundLoadingContainer}>
+                <ActivityIndicator size="large" color="#3b82f6" />
+                <Text style={styles.playgroundLoadingText}>Loading previews, Sir...</Text>
+              </View>
+            ) : projects.length === 0 ? (
+              <View style={styles.playgroundEmptyContainer}>
+                <Ionicons name="folder-open-outline" size={64} color="#475569" style={styles.playgroundEmptyIcon} />
+                <Text style={styles.playgroundEmptyTitle}>Playground is empty</Text>
+                <Text style={styles.playgroundEmptyDesc}>
+                  Live previews will show up here, Sir. Ask VoxKage to build an app or webpage to see it live here.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView 
+                style={styles.playgroundProjectsList} 
+                contentContainerStyle={{ padding: 16, gap: 12 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {projects.map((p) => (
+                  <View key={p.id} style={styles.projectItemContainer}>
+                    <TouchableOpacity
+                      style={styles.projectItemDetails}
+                      onPress={() => {
+                        setPlaygroundHtml(p.html || '');
+                        setPlaygroundCss(p.css || '');
+                        setPlaygroundJs(p.js || '');
+                        setPlaygroundProjectName(p.name || 'Untitled App');
+                        setPlaygroundProjectId(p.id);
+                        setPlaygroundView('preview');
+                        setPlaygroundRevision((prev) => prev + 1);
+                      }}
+                    >
+                      <Ionicons name="cube-outline" size={18} color="#3b82f6" style={styles.projectItemIcon} />
+                      <View style={{ flex: 1 }}>
+                        {projectToRename?.id === p.id ? (
+                          <TextInput
+                            style={styles.projectRenameInput}
+                            value={renameProjectName}
+                            onChangeText={setRenameProjectName}
+                            autoFocus={true}
+                            onSubmitEditing={() => handleRenameProject(p.id, renameProjectName)}
+                            onBlur={() => handleRenameProject(p.id, renameProjectName)}
+                            returnKeyType="done"
+                          />
+                        ) : (
+                          <Text style={styles.projectItemName} numberOfLines={1}>
+                            {p.name || 'Untitled Preview'}
+                          </Text>
+                        )}
+                        <Text style={styles.projectItemSub}>Tap to open preview, Sir</Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {projectToRename?.id !== p.id && (
+                      <View style={styles.projectActionRow}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setProjectToRename({ id: p.id, name: p.name });
+                            setRenameProjectName(p.name);
+                          }}
+                          style={styles.projectActionBtn}
+                        >
+                          <Ionicons name="create-outline" size={16} color="#94a3b8" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleDeleteProject(p.id)}
+                          style={styles.projectActionBtn}
+                        >
+                          <Ionicons name="trash-outline" size={15} color="#ef4444" />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        ) : (
+          /* Live Preview sandbox */
+          <View style={styles.sandboxContainer}>
+            {Platform.OS === 'web' ? (
+              // @ts-ignore
+              <iframe
+                key={`sb-${playgroundRevision}`}
+                srcDoc={compiledSandboxHtml}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  border: 'none',
+                  width: '100%',
+                  height: '100%',
+                  backgroundColor: '#0d0d0d'
+                }}
+                title="Code Preview Sandbox"
+              />
+            ) : (
+              <WebView
+                key={`sb-wv-${playgroundRevision}`}
+                originWhitelist={['*']}
+                source={{ html: compiledSandboxHtml }}
+                style={styles.webView}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                backgroundColor="#0d0d0d"
+              />
+            )}
+          </View>
+        )}
       </Animated.View>
+
+      {/* Delete Confirmation Modal */}
+      {sessionToDelete && (
+        <View style={styles.confirmModalBackdrop}>
+          <View style={styles.confirmModalContent}>
+            <Ionicons name="trash-outline" size={32} color="#ef4444" style={styles.confirmIcon} />
+            <Text style={styles.confirmTitle}>Delete Chat Thread</Text>
+            <Text style={styles.confirmMessage}>
+              Are you sure you want to permanently delete &quot;{sessionToDelete.name}&quot;, Sir?
+            </Text>
+            <View style={styles.confirmButtonsRow}>
+              <TouchableOpacity
+                style={styles.confirmCancelBtn}
+                onPress={() => setSessionToDelete(null)}
+              >
+                <Text style={styles.confirmCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.confirmDeleteBtn}
+                onPress={() => {
+                  const id = sessionToDelete.id;
+                  setSessionToDelete(null);
+                  executeDeleteSession(id);
+                }}
+              >
+                <Text style={styles.confirmDeleteBtnText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -1447,7 +1914,7 @@ const styles = StyleSheet.create({
   },
   mainWrapper: {
     flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 44 : 20,
+    paddingTop: Platform.OS === 'ios' ? 44 : (Platform.OS === 'web' ? 40 : 20),
   },
   navBar: {
     flexDirection: 'row',
@@ -1653,7 +2120,7 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         outlineStyle: 'none',
-      },
+      } as any,
       default: {},
     }),
   },
@@ -1736,7 +2203,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#171717',
     borderRightWidth: 1,
     borderRightColor: '#262626',
-    paddingTop: Platform.OS === 'ios' ? 44 : 20,
+    paddingTop: Platform.OS === 'ios' ? 44 : (Platform.OS === 'web' ? 40 : 20),
     zIndex: 101,
   },
   sidebarHeader: {
@@ -1915,11 +2382,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    width: screenWidth,
+    width: drawerWidth,
     backgroundColor: '#08111f',
     borderLeftWidth: 1,
     borderLeftColor: '#111827',
-    paddingTop: Platform.OS === 'ios' ? 44 : 20,
+    paddingTop: Platform.OS === 'ios' ? 44 : (Platform.OS === 'web' ? 40 : 20),
     zIndex: 101,
   },
   playgroundHeader: {
@@ -1961,6 +2428,9 @@ const styles = StyleSheet.create({
   },
   sandboxContainer: {
     flex: 1,
+    position: 'relative',
+    width: '100%',
+    height: '100%',
   },
   webView: {
     flex: 1,
@@ -2175,5 +2645,257 @@ const styles = StyleSheet.create({
   },
   variantDropdownTextActive: {
     color: '#60a5fa',
+  },
+  confirmModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2000,
+  },
+  confirmModalContent: {
+    width: '85%',
+    maxWidth: 320,
+    backgroundColor: '#0c1222',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    padding: 24,
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+      },
+      default: {},
+    }),
+  },
+  confirmIcon: {
+    marginBottom: 16,
+  },
+  confirmTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  confirmMessage: {
+    color: '#94a3b8',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  confirmButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  confirmCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#1e293b',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  confirmCancelBtnText: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  confirmDeleteBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#ef4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  confirmDeleteBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  playgroundBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  playgroundBackText: {
+    color: '#60a5fa',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  playgroundProjectTitle: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 12,
+  },
+  playgroundListContainer: {
+    flex: 1,
+    backgroundColor: '#050a18',
+  },
+  playgroundLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  playgroundLoadingText: {
+    color: '#94a3b8',
+    fontSize: 13,
+  },
+  playgroundEmptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    gap: 12,
+  },
+  playgroundEmptyIcon: {
+    marginBottom: 8,
+    opacity: 0.5,
+  },
+  playgroundEmptyTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  playgroundEmptyDesc: {
+    color: '#475569',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  playgroundProjectsList: {
+    flex: 1,
+  },
+  projectItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0c1222',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    borderRadius: 14,
+    padding: 12,
+    gap: 12,
+  },
+  projectItemDetails: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  projectItemIcon: {
+    padding: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderRadius: 10,
+  },
+  projectItemName: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  projectItemSub: {
+    color: '#475569',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  projectRenameInput: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2563eb',
+    padding: 0,
+    margin: 0,
+    flex: 1,
+  },
+  projectActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  projectActionBtn: {
+    padding: 6,
+  },
+  openPlaygroundBubbleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  openPlaygroundBubbleBtnText: {
+    color: '#60a5fa',
+    fontSize: 11.5,
+    fontWeight: '600',
+  },
+  refiningHudBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    borderColor: 'rgba(59, 130, 246, 0.25)',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  refiningHudLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  refiningHudText: {
+    color: '#60a5fa',
+    fontSize: 12.5,
+    fontWeight: '600',
+  },
+  refiningHudCloseBtn: {
+    padding: 2,
+  },
+  playgroundRefineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderColor: 'rgba(59, 130, 246, 0.25)',
+    borderWidth: 1,
+    borderRadius: 8,
+  },
+  playgroundRefineText: {
+    color: '#60a5fa',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  playgroundTitleContainer: {
+    position: 'absolute',
+    left: 80,
+    right: 80,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
   },
 });
