@@ -53,10 +53,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     overflow: 'hidden',
     position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 24 },
-    shadowOpacity: 0.6,
-    shadowRadius: 32,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 24px 32px rgba(0, 0, 0, 0.6)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 24 },
+        shadowOpacity: 0.6,
+        shadowRadius: 32,
+      },
+    }),
   },
   statusBarMock: {
     height: 36,

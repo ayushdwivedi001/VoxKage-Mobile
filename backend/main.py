@@ -163,6 +163,33 @@ def get_root():
 def health():
     return {"status": "alive", "engine": "VoxKage Mobile Cloud", "timestamp": "2026-06-17"}
 
+@app.get("/models")
+def get_models():
+    """
+    Fetch active models from OpenCode Zen API or return standard default fallbacks.
+    """
+    import os
+    import requests
+    api_key = os.getenv("OPENCODE_API_KEY")
+    default_models = ["deepseek-v4-flash-free", "gemini-2.5-flash", "claude-3.5-sonnet"]
+    if not api_key:
+        return {"models": default_models}
+    try:
+        response = requests.get(
+            "https://opencode.ai/zen/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5
+        )
+        if response.status_code == 200:
+            data = response.json()
+            models = [m["id"] for m in data.get("data", [])]
+            if models:
+                return {"models": models}
+    except Exception as e:
+        print(f"Error calling OpenCode Zen models API: {e}")
+    return {"models": default_models}
+
+
 # Enable CORS for mobile clients and local previews
 app.add_middleware(
     CORSMiddleware,

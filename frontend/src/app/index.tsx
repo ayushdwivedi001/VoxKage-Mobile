@@ -14,8 +14,9 @@ import {
   Platform,
   Alert,
   Clipboard,
+  Modal,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -53,9 +54,18 @@ export default function ChatScreen() {
   const [streamingText, setStreamingText] = useState('');
   const [isNewChat, setIsNewChat] = useState(true);
 
+  // Models State
+  const [models, setModels] = useState<string[]>(['deepseek-v4-flash-free', 'gemini-2.5-flash', 'claude-3.5-sonnet']);
+  const [activeModel, setActiveModel] = useState('deepseek-v4-flash-free');
+  const VARIANTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
+  const [activeVariantIndex, setActiveVariantIndex] = useState(2); // default High
+  const [showModelModal, setShowModelModal] = useState(false);
+
+  // Inline Sidebar Session Rename State
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionName, setEditingSessionName] = useState('');
+
   // UI Toggles & Controls
-  const [isDeepThink, setIsDeepThink] = useState(false);
-  const [isSearch, setIsSearch] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
 
@@ -63,7 +73,7 @@ export default function ChatScreen() {
   const [playgroundHtml, setPlaygroundHtml] = useState('<h1>No live preview compiled yet, Sir.</h1><p>Ask VoxKage to build an app/web page to see it live here.</p>');
   const [playgroundCss, setPlaygroundCss] = useState('');
   const [playgroundJs, setPlaygroundJs] = useState('');
-  const [playgroundProjectName, setPlaygroundProjectName] = useState('Live Preview Sandbox');
+  const [playgroundProjectName, setPlaygroundProjectName] = useState('New Live App');
 
   // Animated Drawers
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -71,6 +81,9 @@ export default function ChatScreen() {
 
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
   const playgroundAnim = useRef(new Animated.Value(screenWidth)).current;
+
+  // Border lit up entrance animation
+  const borderGlowAnim = useRef(new Animated.Value(0)).current;
 
   // References
   const wsRef = useRef<WebSocket | null>(null);
@@ -91,8 +104,34 @@ export default function ChatScreen() {
       setEmail(storedEmail);
       setBackendUrl(storedUrl);
 
+      // Trigger border lighting entrance transition (gracious breathing pulse)
+      Animated.sequence([
+        Animated.timing(borderGlowAnim, {
+          toValue: 1,
+          duration: 1200,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(borderGlowAnim, {
+          toValue: 0.35,
+          duration: 800,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(borderGlowAnim, {
+          toValue: 0.75,
+          duration: 800,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(borderGlowAnim, {
+          toValue: 0.22,
+          duration: 1500,
+          useNativeDriver: Platform.OS !== 'web',
+        })
+      ]).start();
+
+      // Fetch dynamic models list from backend
+      fetchModels(storedUrl, storedToken);
+
       if (storedToken.startsWith('mock-')) {
-        // Load mock sessions for Simulator Mode
         setSessions([
           { id: 'mock-1', name: 'Mock Live Dashboard Preview', created_at: '2026-06-17' },
           { id: 'mock-2', name: 'System Volume command log', created_at: '2026-06-17' },
@@ -120,22 +159,174 @@ export default function ChatScreen() {
     }
   }, [messages, streamingText]);
 
-  // Gradient V Logo SVG (No box, clean)
+  // Fluid background HTML (Canvas-based perlin noise shader)
+  const fluidBackgroundHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #03060f; overflow: hidden; width: 100vw; height: 100vh; }
+  canvas { display: block; width: 100vw; height: 100vh; filter: blur(4px); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let w = canvas.width = window.innerWidth;
+let h = canvas.height = window.innerHeight;
+let t = 0;
+
+// Create an offscreen noise pattern to achieve an organic paper/film grain texture
+const noiseCanvas = document.createElement('canvas');
+const nCtx = noiseCanvas.getContext('2d');
+noiseCanvas.width = 128;
+noiseCanvas.height = 128;
+const nData = nCtx.createImageData(128, 128);
+const d = nData.data;
+for (let i = 0; i < d.length; i += 4) {
+  const val = Math.floor(Math.random() * 255);
+  d[i] = val;     // R
+  d[i+1] = val;   // G
+  d[i+2] = val;   // B
+  d[i+3] = 22;    // Alpha (grain opacity ~8.6%)
+}
+nCtx.putImageData(nData, 0, 0);
+const noisePattern = ctx.createPattern(noiseCanvas, 'repeat');
+
+function draw() {
+  ctx.fillStyle = '#020409';
+  ctx.fillRect(0, 0, w, h);
+
+  const numRibbons = 15;
+  for (let i = 0; i < numRibbons; i++) {
+    const ratio = i / numRibbons;
+    const speed = 0.25 + ratio * 0.15;
+    const amp = 60 + ratio * 80;
+    const freq = 0.002 + ratio * 0.002;
+    
+    ctx.beginPath();
+    const steps = 40;
+    const pts = [];
+    for (let y = 0; y <= h; y += h / steps) {
+      const xOffset = Math.sin(y * freq + t * speed + ratio * Math.PI * 2) * amp;
+      // Widen the spread (1.4x screen width) so margins are fully covered
+      const xCenter = w * 0.5 + (ratio - 0.5) * (w * 1.4) + xOffset;
+      pts.push({ x: xCenter, y });
+    }
+    
+    // Substantially widen ribbons (180px - 460px width) for seamless blending
+    const ribbonWidth = 180 + ratio * 280;
+    ctx.moveTo(pts[0].x - ribbonWidth * 0.5, pts[0].y);
+    for (let j = 1; j < pts.length; j++) {
+      ctx.lineTo(pts[j].x - ribbonWidth * 0.5, pts[j].y);
+    }
+    for (let j = pts.length - 1; j >= 0; j--) {
+      ctx.lineTo(pts[j].x + ribbonWidth * 0.5, pts[j].y);
+    }
+    ctx.closePath();
+    
+    const grad = ctx.createLinearGradient(w * 0.5, 0, w * 0.5, h);
+    const alpha = 0.16 + Math.sin(t * 0.12 + ratio * 3) * 0.04;
+    
+    grad.addColorStop(0, 'rgba(2, 4, 15, 0)');
+    grad.addColorStop(0.18, 'rgba(5, 30, 95, ' + (alpha * 0.55) + ')');
+    grad.addColorStop(0.48, 'rgba(30, 135, 255, ' + (alpha * 0.95) + ')');
+    grad.addColorStop(0.68, 'rgba(255, 225, 215, ' + (alpha * 1.15) + ')');
+    grad.addColorStop(0.85, 'rgba(235, 45, 45, ' + (alpha * 1.45) + ')');
+    grad.addColorStop(1, 'rgba(120, 15, 15, ' + (alpha * 0.95) + ')');
+    
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  // Draw the fine vertical ribbed lines texture overlay
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.012)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x < w; x += 3) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+  }
+  ctx.stroke();
+
+  // Draw noise grain overlay
+  ctx.fillStyle = noisePattern;
+  ctx.fillRect(0, 0, w, h);
+
+  t += 0.004;
+  requestAnimationFrame(draw);
+}
+draw();
+window.onresize = () => {
+  w = canvas.width = window.innerWidth;
+  h = canvas.height = window.innerHeight;
+};
+<\/script>
+</body>
+</html>
+  `;
+
+  // Gradient V Logo SVG (No box, clean geometric layered ribbons)
   const LogoV = ({ size = 64 }: { size?: number }) => (
     <Svg width={size} height={size} viewBox="0 0 100 100">
       <Defs>
-        <SvgGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <Stop offset="0%" stopColor="#2563eb" />
-          <Stop offset="50%" stopColor="#1d4ed8" />
-          <Stop offset="100%" stopColor="#020617" />
+        <SvgGradient id="logoGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <Stop offset="0%" stopColor="#3b82f6" stopOpacity={0.9} />
+          <Stop offset="50%" stopColor="#2563eb" stopOpacity={0.9} />
+          <Stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.9} />
+        </SvgGradient>
+        <SvgGradient id="logoGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
+          <Stop offset="0%" stopColor="#1d4ed8" stopOpacity={0.9} />
+          <Stop offset="50%" stopColor="#0f172a" stopOpacity={0.9} />
+          <Stop offset="100%" stopColor="#020617" stopOpacity={0.9} />
         </SvgGradient>
       </Defs>
       <Path
-        d="M20 15 L43 82 L57 82 L80 15 L63 15 L50 56 L37 15 Z"
-        fill="url(#logoGrad)"
+        d="M20 18 L46 82 L56 82 L32 18 Z"
+        fill="url(#logoGrad1)"
+      />
+      <Path
+        d="M80 18 L54 82 L44 82 L68 18 Z"
+        fill="url(#logoGrad2)"
       />
     </Svg>
   );
+
+  const formatModelName = (modelId: string) => {
+    if (modelId === 'deepseek-v4-flash-free') return 'DeepSeek Flash (Free)';
+    if (modelId === 'gemini-2.5-flash') return 'Gemini 2.5 Flash';
+    if (modelId === 'claude-3.5-sonnet') return 'Claude 3.5 Sonnet';
+    return modelId
+      .split('-')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
+  const fetchModels = async (url: string, jwtToken: string) => {
+    if (jwtToken.startsWith('mock-')) {
+      // Mock models list in simulation mode
+      setModels(['deepseek-v4-flash-free', 'gemini-2.5-flash', 'claude-3.5-sonnet', 'openai-gpt-4o']);
+      return;
+    }
+    try {
+      const response = await fetch(`${url}/models`, {
+        headers: { Authorization: `Bearer ${jwtToken}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.models && data.models.length > 0) {
+          setModels(data.models);
+          setActiveModel(data.models[0]);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch models from API', e);
+    }
+  };
 
   const loadSessions = async (url: string, jwtToken: string) => {
     try {
@@ -225,6 +416,38 @@ export default function ChatScreen() {
         },
       ]
     );
+  };
+
+  // Side Panel rename function
+  const handleRenameSession = async (sessionId: string, newName: string) => {
+    if (!newName.trim()) return;
+
+    if (token?.startsWith('mock-')) {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s))
+      );
+      setEditingSessionId(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendUrl}/sessions/${sessionId}/rename?name=${encodeURIComponent(newName)}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s))
+        );
+      } else {
+        Alert.alert('Error', 'Failed to rename session, Sir.');
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Connection failure renaming session, Sir.');
+    } finally {
+      setEditingSessionId(null);
+    }
   };
 
   const selectSession = async (sessionId: string) => {
@@ -369,7 +592,6 @@ export default function ChatScreen() {
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
 
-    // Simulator Mode Logic
     if (token?.startsWith('mock-')) {
       const userQuery = inputText.trim();
       setInputText('');
@@ -381,7 +603,6 @@ export default function ChatScreen() {
       ]);
       setStreamingText('');
 
-      // Simulate streaming response
       setTimeout(() => {
         let isCodeQuery = /dashboard|html|website|page/i.test(userQuery);
         let isCmdQuery = /run|git|sys/i.test(userQuery);
@@ -458,18 +679,11 @@ export default function ChatScreen() {
     setLoading(true);
     setStreamingText('');
 
-    let modelKey = 'deepseek-flash';
-    if (isDeepThink) {
-      modelKey = 'claude-sonnet';
-    } else if (isSearch) {
-      modelKey = 'gemini-flash';
-    }
-
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
         JSON.stringify({
           message: userQuery,
-          model: modelKey,
+          model: activeModel,
         })
       );
     } else {
@@ -479,7 +693,7 @@ export default function ChatScreen() {
           wsRef.current.send(
             JSON.stringify({
               message: userQuery,
-              model: modelKey,
+              model: activeModel,
             })
           );
         } else {
@@ -565,6 +779,10 @@ export default function ChatScreen() {
     }
   };
 
+  const toggleVariant = () => {
+    setActiveVariantIndex((prev) => (prev + 1) % VARIANTS.length);
+  };
+
   const openSidebar = () => {
     setIsSidebarOpen(true);
     Animated.timing(sidebarAnim, {
@@ -635,6 +853,45 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Fluid WebGL-style animated wavy background */}
+      {Platform.OS === 'web' ? (
+        // @ts-ignore
+        <iframe
+          srcDoc={fluidBackgroundHTML}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            border: 'none',
+            width: '100%',
+            height: '100%',
+            zIndex: 0,
+            pointerEvents: 'none',
+          }}
+          title="Fluid Background Shader"
+        />
+      ) : (
+        <WebView
+          source={{ html: fluidBackgroundHTML }}
+          style={[styles.fluidBackground, { pointerEvents: 'none' as any }]}
+          scrollEnabled={false}
+          javaScriptEnabled={true}
+        />
+      )}
+
+      {/* Border Lit Up Entrance Animation Overlay */}
+      <Animated.View
+        style={[
+          styles.litBorderOverlay,
+          {
+            opacity: borderGlowAnim,
+            pointerEvents: 'none' as any,
+          },
+        ]}
+      />
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.mainWrapper}
@@ -651,15 +908,9 @@ export default function ChatScreen() {
               : sessions.find((s) => s.id === currentSessionId)?.name || 'Active Session'}
           </Text>
 
-          <View style={styles.navRightButtons}>
-            <TouchableOpacity onPress={createNewSession} style={styles.navButton}>
-              <Ionicons name="add-outline" size={22} color="#9ca3af" />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={openPlayground} style={styles.playgroundBtn}>
-              <Ionicons name="code-slash-outline" size={18} color="#2563eb" />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity onPress={createNewSession} style={styles.navButton}>
+            <Ionicons name="add-outline" size={22} color="#9ca3af" />
+          </TouchableOpacity>
         </View>
 
         {/* Chat Feed */}
@@ -775,44 +1026,109 @@ export default function ChatScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Model Selection Capsules */}
+          {/* Model & Variant Toggles (Capsules) */}
           <View style={styles.capsulesContainer}>
             <TouchableOpacity
-              style={[styles.capsule, isDeepThink && styles.capsuleActive]}
-              onPress={() => {
-                setIsDeepThink(!isDeepThink);
-                if (isDeepThink) setIsSearch(false);
-              }}
+              style={styles.capsule}
+              onPress={() => setShowModelModal(true)}
             >
               <Ionicons
-                name="bulb-outline"
+                name="sparkles-outline"
                 size={12}
-                color={isDeepThink ? '#ffffff' : '#2563eb'}
+                color="#2563eb"
               />
-              <Text style={[styles.capsuleText, isDeepThink && styles.capsuleTextActive]}>
-                DeepThink (R1)
+              <Text style={styles.capsuleText}>
+                {formatModelName(activeModel)}
               </Text>
+              <Ionicons name="chevron-down" size={10} color="#9ca3af" />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.capsule, isSearch && styles.capsuleActive]}
-              onPress={() => {
-                setIsSearch(!isSearch);
-                if (isSearch) setIsDeepThink(false);
-              }}
+              style={styles.capsule}
+              onPress={toggleVariant}
             >
               <Ionicons
-                name="earth-outline"
+                name="options-outline"
                 size={12}
-                color={isSearch ? '#ffffff' : '#2563eb'}
+                color="#2563eb"
               />
-              <Text style={[styles.capsuleText, isSearch && styles.capsuleTextActive]}>
-                Search
+              <Text style={styles.capsuleText}>
+                Variant: {VARIANTS[activeVariantIndex]}
               </Text>
             </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Model Selection Overlay — Inline Bottom Sheet inside Phone Frame */}
+      {showModelModal && (
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setShowModelModal(false)}
+          style={styles.inlineModalBackdrop}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.inlineModalContent}
+          >
+            {/* Header */}
+            <View style={styles.inlineModalHeader}>
+              <View style={styles.inlineModalTitleRow}>
+                <Ionicons name="hardware-chip-outline" size={18} color="#3b82f6" />
+                <Text style={styles.inlineModalTitle}>Select Model</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowModelModal(false)} style={styles.inlineModalCloseBtn}>
+                <Ionicons name="close" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Variant Section */}
+            <Text style={styles.inlineModalSectionLabel}>Reasoning Depth</Text>
+            <View style={styles.variantChipRow}>
+              {VARIANTS.map((v, i) => (
+                <TouchableOpacity
+                  key={v}
+                  style={[
+                    styles.inlineVariantChip,
+                    activeVariantIndex === i && styles.inlineVariantChipActive,
+                  ]}
+                  onPress={() => setActiveVariantIndex(i)}
+                >
+                  <Text style={[styles.inlineVariantChipText, activeVariantIndex === i && styles.inlineVariantChipTextActive]}>{v}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Models List */}
+            <Text style={styles.inlineModalSectionLabel}>Available Models</Text>
+            <ScrollView style={styles.inlineModalList} contentContainerStyle={{ gap: 8 }}>
+              {models.map((model) => (
+                <TouchableOpacity
+                  key={model}
+                  style={[
+                    styles.inlineModelItem,
+                    activeModel === model && styles.inlineModelItemActive,
+                  ]}
+                  onPress={() => {
+                    setActiveModel(model);
+                    setShowModelModal(false);
+                  }}
+                >
+                  <View style={styles.inlineModelItemDetails}>
+                    <Text style={[styles.inlineModelName, activeModel === model && styles.inlineModelNameActive]}>
+                      {formatModelName(model)}
+                    </Text>
+                    <Text style={styles.inlineModelId}>{model}</Text>
+                  </View>
+                  {activeModel === model && (
+                    <Ionicons name="checkmark-circle" size={18} color="#3b82f6" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
 
       {/* Voice pulse overlay */}
       {isVoiceActive && (
@@ -845,14 +1161,25 @@ export default function ChatScreen() {
           <Text style={styles.newChatBtnText}>New Chat Thread</Text>
         </TouchableOpacity>
 
+        {/* Dedicated Sandbox Playground Button in Sidebar */}
+        <TouchableOpacity
+          onPress={() => {
+            closeSidebar();
+            openPlayground();
+          }}
+          style={styles.sidebarPlaygroundBtn}
+        >
+          <Ionicons name="code-slash-outline" size={16} color="#2563eb" />
+          <Text style={styles.sidebarPlaygroundText}>Live Sandbox Preview</Text>
+        </TouchableOpacity>
+
         <Text style={styles.historyLabel}>History</Text>
         <ScrollView style={styles.sessionsList}>
           {sessions.map((s) => (
-            <TouchableOpacity
+            <View
               key={s.id}
-              onPress={() => selectSession(s.id)}
               style={[
-                styles.sessionItem,
+                styles.sessionItemContainer,
                 s.id === currentSessionId && styles.sessionItemActive,
               ]}
             >
@@ -861,22 +1188,54 @@ export default function ChatScreen() {
                 size={16}
                 color={s.id === currentSessionId ? '#2563eb' : '#4b5563'}
               />
-              <Text
-                style={[
-                  styles.sessionText,
-                  s.id === currentSessionId && styles.sessionTextActive,
-                ]}
-                numberOfLines={1}
-              >
-                {s.name}
-              </Text>
-              <TouchableOpacity
-                onPress={() => deleteSession(s.id)}
-                style={styles.sessionDeleteBtn}
-              >
-                <Ionicons name="trash-outline" size={13} color="#ef4444" />
-              </TouchableOpacity>
-            </TouchableOpacity>
+              
+              {editingSessionId === s.id ? (
+                <TextInput
+                  style={styles.sessionRenameInput}
+                  value={editingSessionName}
+                  onChangeText={setEditingSessionName}
+                  autoFocus={true}
+                  onSubmitEditing={() => handleRenameSession(s.id, editingSessionName)}
+                  onBlur={() => handleRenameSession(s.id, editingSessionName)}
+                  returnKeyType="done"
+                />
+              ) : (
+                <TouchableOpacity
+                  onPress={() => selectSession(s.id)}
+                  style={styles.sessionTextWrapper}
+                >
+                  <Text
+                    style={[
+                      styles.sessionText,
+                      s.id === currentSessionId && styles.sessionTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {s.name}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {editingSessionId !== s.id && (
+                <View style={styles.sessionActionRow}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingSessionId(s.id);
+                      setEditingSessionName(s.name);
+                    }}
+                    style={styles.sessionActionBtn}
+                  >
+                    <Ionicons name="create-outline" size={14} color="#9ca3af" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => deleteSession(s.id)}
+                    style={styles.sessionActionBtn}
+                  >
+                    <Ionicons name="trash-outline" size={13} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           ))}
         </ScrollView>
 
@@ -906,9 +1265,10 @@ export default function ChatScreen() {
         />
       )}
       <Animated.View style={[styles.playgroundDrawer, { left: playgroundAnim }]}>
+        {/* Playground Header */}
         <View style={styles.playgroundHeader}>
           <View style={styles.playgroundTitleRow}>
-            <Ionicons name="code-slash" size={18} color="#2563eb" />
+            <Ionicons name="code-slash" size={18} color="#3b82f6" />
             <Text style={styles.playgroundTitle}>{playgroundProjectName}</Text>
           </View>
           <TouchableOpacity onPress={closePlayground}>
@@ -916,14 +1276,10 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.playgroundTabs}>
-          <View style={[styles.playgroundTab, styles.playgroundTabActive]}>
-            <Text style={styles.playgroundTabText}>Live View</Text>
-          </View>
-        </View>
-
+        {/* Live Preview sandbox */}
         <View style={styles.sandboxContainer}>
           {Platform.OS === 'web' ? (
+            // @ts-ignore
             <iframe
               srcDoc={compiledSandboxHtml}
               style={{ border: 'none', width: '100%', height: '100%', backgroundColor: '#0d0d0d' }}
@@ -948,10 +1304,39 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0d0d0d', // solid dark theme
+    backgroundColor: '#050a18',
+  },
+  fluidBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+    opacity: 0.95,
+  },
+  litBorderOverlay: {
+    ...StyleSheet.absoluteFill,
+    borderWidth: 1.2,
+    borderColor: '#3b82f6',
+    borderRadius: Platform.OS === 'web' ? 32 : 0,
+    zIndex: 999,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 0px 12px rgba(59, 130, 246, 0.8)',
+      },
+      default: {
+        shadowColor: '#3b82f6',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8,
+        shadowRadius: 12,
+        elevation: 8,
+      },
+    }),
   },
   mainWrapper: {
     flex: 1,
+    paddingTop: Platform.OS === 'ios' ? 44 : 20,
   },
   navBar: {
     flexDirection: 'row',
@@ -961,6 +1346,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#171717',
+    zIndex: 10,
   },
   navButton: {
     width: 36,
@@ -976,21 +1362,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     marginHorizontal: 12,
-  },
-  navRightButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  playgroundBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#171717',
-    borderWidth: 1,
-    borderColor: '#262626',
   },
   welcomeContainer: {
     flex: 1,
@@ -1016,7 +1387,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   userBubble: {
-    backgroundColor: '#262626', // flat gray bubble
+    backgroundColor: '#262626',
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1050,7 +1421,7 @@ const styles = StyleSheet.create({
   },
   assistantBubble: {
     flex: 1,
-    paddingVertical: 4, // flat transparent card like ChatGPT/Gemini
+    paddingVertical: 4,
   },
   typingIndicatorContainer: {
     marginTop: 6,
@@ -1096,12 +1467,11 @@ const styles = StyleSheet.create({
   inputAreaContainer: {
     padding: 12,
     paddingBottom: Platform.OS === 'ios' ? 20 : 12,
-    backgroundColor: '#0d0d0d',
   },
   inputPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#171717', // flat dark gray field
+    backgroundColor: '#171717',
     borderWidth: 1,
     borderColor: '#262626',
     borderRadius: 24,
@@ -1134,7 +1504,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendCircleActive: {
-    backgroundColor: '#2563eb', // turns active blue when text exists
+    backgroundColor: '#2563eb',
   },
   capsulesContainer: {
     flexDirection: 'row',
@@ -1153,18 +1523,10 @@ const styles = StyleSheet.create({
     borderColor: '#262626',
     borderWidth: 1,
   },
-  capsuleActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
-  },
   capsuleText: {
     fontSize: 11,
     fontWeight: '500',
     color: '#9ca3af',
-  },
-  capsuleTextActive: {
-    color: '#ffffff',
-    fontWeight: '600',
   },
   voiceOverlay: {
     ...StyleSheet.absoluteFill,
@@ -1197,7 +1559,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 280,
-    backgroundColor: '#171717', // flat dark gray drawer
+    backgroundColor: '#171717',
     borderRightWidth: 1,
     borderRightColor: '#262626',
     paddingTop: Platform.OS === 'ios' ? 44 : 20,
@@ -1220,6 +1582,7 @@ const styles = StyleSheet.create({
   },
   newChatBtn: {
     margin: 12,
+    marginBottom: 6,
     height: 42,
     borderRadius: 10,
     backgroundColor: '#2563eb',
@@ -1229,6 +1592,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   newChatBtnText: {
+    color: '#ffffff',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  sidebarPlaygroundBtn: {
+    marginHorizontal: 12,
+    marginBottom: 12,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#262626',
+    borderWidth: 1,
+    borderColor: '#404040',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sidebarPlaygroundText: {
     color: '#ffffff',
     fontWeight: '600',
     fontSize: 13,
@@ -1245,26 +1626,44 @@ const styles = StyleSheet.create({
   sessionsList: {
     flex: 1,
   },
-  sessionItem: {
+  sessionItemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     gap: 10,
   },
   sessionItemActive: {
     backgroundColor: '#262626',
   },
+  sessionTextWrapper: {
+    flex: 1,
+    height: '100%',
+    justifyContent: 'center',
+  },
   sessionText: {
     color: '#9ca3af',
     fontSize: 13.5,
-    flex: 1,
   },
   sessionTextActive: {
     color: '#ffffff',
     fontWeight: '600',
   },
-  sessionDeleteBtn: {
+  sessionRenameInput: {
+    flex: 1,
+    color: '#ffffff',
+    fontSize: 13.5,
+    padding: 0,
+    margin: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2563eb',
+  },
+  sessionActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sessionActionBtn: {
     padding: 4,
   },
   sidebarFooter: {
@@ -1309,10 +1708,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    width: screenWidth * 0.9,
-    backgroundColor: '#0d0d0d',
+    width: screenWidth,
+    backgroundColor: '#08111f',
     borderLeftWidth: 1,
-    borderLeftColor: '#262626',
+    borderLeftColor: '#111827',
     paddingTop: Platform.OS === 'ios' ? 44 : 20,
     zIndex: 101,
   },
@@ -1359,5 +1758,170 @@ const styles = StyleSheet.create({
   webView: {
     flex: 1,
     backgroundColor: '#0d0d0d',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#171717',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: '#262626',
+    padding: 20,
+    paddingBottom: 40,
+    gap: 8,
+  },
+  modalTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  modelItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 48,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#0d0d0d',
+    borderWidth: 1,
+    borderColor: '#262626',
+    gap: 10,
+  },
+  modelItemActive: {
+    borderColor: '#2563eb',
+    backgroundColor: 'rgba(37,99,235,0.05)',
+  },
+  modelItemText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    flex: 1,
+  },
+  modelItemTextActive: {
+    color: '#ffffff',
+    fontWeight: '600',
+  },
+
+  // Inline Bottom Sheet Modal styles
+  inlineModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-end',
+    zIndex: 998,
+  },
+  inlineModalContent: {
+    backgroundColor: '#0c1222',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    padding: 18,
+    paddingBottom: 30,
+    maxHeight: '65%',
+  },
+  inlineModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
+  inlineModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inlineModalTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  inlineModalCloseBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: '#1e293b',
+  },
+  inlineModalSectionLabel: {
+    color: '#475569',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  variantChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 6,
+  },
+  inlineVariantChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    backgroundColor: '#0f172a',
+  },
+  inlineVariantChipActive: {
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+  },
+  inlineVariantChipText: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  inlineVariantChipTextActive: {
+    color: '#60a5fa',
+  },
+  inlineModalList: {
+    marginTop: 4,
+  },
+  inlineModelItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    marginBottom: 6,
+    gap: 8,
+  },
+  inlineModelItemActive: {
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+  },
+  inlineModelItemDetails: {
+    flex: 1,
+  },
+  inlineModelName: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  inlineModelNameActive: {
+    color: '#ffffff',
+  },
+  inlineModelId: {
+    color: '#475569',
+    fontSize: 10,
+    marginTop: 1,
   },
 });

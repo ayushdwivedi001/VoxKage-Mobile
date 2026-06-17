@@ -14,6 +14,8 @@ MODEL_MAP = {
 }
 
 def get_opencode_model(model_key: str) -> str:
+    if "-" in model_key or model_key in MODEL_MAP.values():
+        return model_key
     return MODEL_MAP.get(model_key, "deepseek-v4-flash-free")
 
 def query_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history: list = None) -> str:

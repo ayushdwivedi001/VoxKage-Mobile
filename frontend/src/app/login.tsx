@@ -47,16 +47,24 @@ export default function LoginScreen() {
   const LogoV = () => (
     <Svg width={80} height={80} viewBox="0 0 100 100" style={styles.logoSvg}>
       <Defs>
-        <SvgGradient id="blueBlackGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <Stop offset="0%" stopColor="#2563eb" />
-          <Stop offset="40%" stopColor="#1d4ed8" />
-          <Stop offset="100%" stopColor="#020617" />
+        <SvgGradient id="logoGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <Stop offset="0%" stopColor="#3b82f6" stopOpacity={0.9} />
+          <Stop offset="50%" stopColor="#2563eb" stopOpacity={0.9} />
+          <Stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.9} />
+        </SvgGradient>
+        <SvgGradient id="logoGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
+          <Stop offset="0%" stopColor="#1d4ed8" stopOpacity={0.9} />
+          <Stop offset="50%" stopColor="#0f172a" stopOpacity={0.9} />
+          <Stop offset="100%" stopColor="#020617" stopOpacity={0.9} />
         </SvgGradient>
       </Defs>
-      {/* Modern geometric slanted V logo */}
       <Path
-        d="M20 15 L43 82 L57 82 L80 15 L63 15 L50 56 L37 15 Z"
-        fill="url(#blueBlackGradient)"
+        d="M20 18 L46 82 L56 82 L32 18 Z"
+        fill="url(#logoGrad1)"
+      />
+      <Path
+        d="M80 18 L54 82 L44 82 L68 18 Z"
+        fill="url(#logoGrad2)"
       />
     </Svg>
   );
@@ -430,10 +438,17 @@ const styles = StyleSheet.create({
   },
   tabBtnActive: {
     backgroundColor: '#171717',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.2)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+      },
+    }),
   },
   tabBtnText: {
     color: '#6b7280',

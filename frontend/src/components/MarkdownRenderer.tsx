@@ -38,18 +38,20 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
       );
     }
 
-    // Render code block
+    // Render code block with VS Code syntax highlighting
     elements.push(
       <View key={`code-${match.index}`} style={styles.codeBlockContainer}>
         <View style={styles.codeBlockHeader}>
           <Text style={styles.codeLanguage}>{language.toUpperCase()}</Text>
           <TouchableOpacity onPress={() => handleCopyCode(code)} style={styles.copyButton}>
-            <Ionicons name="copy-outline" size={14} color="#94a3b8" />
+            <Ionicons name="copy-outline" size={14} color="#8e8e93" />
             <Text style={styles.copyText}>Copy</Text>
           </TouchableOpacity>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.horizontalScroll}>
-          <Text style={styles.codeText}>{code.trim()}</Text>
+          <Text style={styles.codeContainer}>
+            {highlightVSCode(code.trim(), language.toLowerCase())}
+          </Text>
         </ScrollView>
       </View>
     );
@@ -70,12 +72,74 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
   return <View style={styles.container}>{elements}</View>;
 }
 
+// VS Code style syntax highlighter
+function highlightVSCode(code: string, language: string) {
+  // Pattern groups:
+  // 1. Comments: //... or #... or /*...*/
+  // 2. Strings: "..." or '...' or `...`
+  // 3. Keywords
+  // 4. Numbers
+  // 5. HTML tags
+  // 6. Function calls: word followed by paren
+  const tokenRegex = /(\/\/.*|#.*|\/\*[\s\S]*?\*\/)|(".*?"|'.*?'|`[\s\S]*?`)|(\b(?:const|let|var|function|return|class|import|export|from|def|if|else|while|for|in|try|except|as|print|self|public|private|static|void|int|float|string|bool)\b)|(\b\d+\b)|(<[^>]+>)|(\b\w+(?=\s*\())/g;
+
+  let match;
+  let lastIndex = 0;
+  let key = 0;
+  const elements = [];
+
+  tokenRegex.lastIndex = 0;
+
+  while ((match = tokenRegex.exec(code)) !== null) {
+    const textBefore = code.substring(lastIndex, match.index);
+    if (textBefore) {
+      elements.push(
+        <Text key={`text-${key++}`} style={styles.codeTextDefault}>
+          {textBefore}
+        </Text>
+      );
+    }
+
+    const comment = match[1];
+    const str = match[2];
+    const keyword = match[3];
+    const num = match[4];
+    const tag = match[5];
+    const func = match[6];
+
+    if (comment) {
+      elements.push(<Text key={`comment-${key++}`} style={styles.codeComment}>{comment}</Text>);
+    } else if (str) {
+      elements.push(<Text key={`str-${key++}`} style={styles.codeString}>{str}</Text>);
+    } else if (keyword) {
+      elements.push(<Text key={`keyword-${key++}`} style={styles.codeKeyword}>{keyword}</Text>);
+    } else if (num) {
+      elements.push(<Text key={`num-${key++}`} style={styles.codeNumber}>{num}</Text>);
+    } else if (tag) {
+      elements.push(<Text key={`tag-${key++}`} style={styles.codeTag}>{tag}</Text>);
+    } else if (func) {
+      elements.push(<Text key={`func-${key++}`} style={styles.codeFunction}>{func}</Text>);
+    }
+
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  const textAfter = code.substring(lastIndex);
+  if (textAfter) {
+    elements.push(
+      <Text key={`text-${key++}`} style={styles.codeTextDefault}>
+        {textAfter}
+      </Text>
+    );
+  }
+
+  return elements;
+}
+
 function renderTextWithInlineFormatting(rawText: string) {
-  // Split rawText into lines
   const lines = rawText.split('\n');
 
   return lines.map((line, lineIndex) => {
-    // Check if line is a header: #, ##, ###
     if (line.startsWith('#')) {
       const level = line.match(/^#+/)?.[0].length || 1;
       const cleanText = line.replace(/^#+\s*/, '');
@@ -88,7 +152,6 @@ function renderTextWithInlineFormatting(rawText: string) {
       );
     }
 
-    // Check if line is a bullet point: - or *
     if (line.startsWith('- ') || line.startsWith('* ')) {
       const cleanText = line.substring(2);
       return (
@@ -99,7 +162,6 @@ function renderTextWithInlineFormatting(rawText: string) {
       );
     }
 
-    // Check if line is a numbered list: 1.
     const numListMatch = line.match(/^(\d+)\.\s(.*)/);
     if (numListMatch) {
       const num = numListMatch[1];
@@ -112,7 +174,6 @@ function renderTextWithInlineFormatting(rawText: string) {
       );
     }
 
-    // Regular line, render spans
     if (line.trim() === '') {
       return <View key={`empty-${lineIndex}`} style={styles.emptyLine} />;
     }
@@ -126,7 +187,6 @@ function renderTextWithInlineFormatting(rawText: string) {
 }
 
 function renderInlineSpans(text: string) {
-  // Regex to detect **bold**, *italic*, and `inline code`
   const inlineRegex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
   const parts = text.split(inlineRegex);
 
@@ -179,9 +239,9 @@ const styles = StyleSheet.create({
   },
   inlineCode: {
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    color: '#f472b6',
-    paddingHorizontal: 4,
+    backgroundColor: '#2d2d2d',
+    color: '#ce9178',
+    paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
     fontSize: 13,
@@ -214,13 +274,13 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
   bulletDot: {
-    color: '#60a5fa',
+    color: '#2563eb',
     fontSize: 16,
     marginRight: 8,
     lineHeight: 20,
   },
   bulletNum: {
-    color: '#60a5fa',
+    color: '#2563eb',
     fontWeight: '600',
     fontSize: 14,
     marginRight: 8,
@@ -236,10 +296,10 @@ const styles = StyleSheet.create({
     height: 8,
   },
   codeBlockContainer: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
+    backgroundColor: '#1e1e1e', // VS Code editor background
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: '#2d2d2d',
     marginVertical: 12,
     overflow: 'hidden',
   },
@@ -247,14 +307,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#252526', // VS Code title bar
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+    borderBottomColor: '#2d2d2d',
   },
   codeLanguage: {
-    color: '#94a3b8',
+    color: '#858585',
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.5,
@@ -265,17 +325,41 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   copyText: {
-    color: '#94a3b8',
+    color: '#858585',
     fontSize: 11,
     fontWeight: '500',
   },
   horizontalScroll: {
     padding: 16,
   },
-  codeText: {
+  codeContainer: {
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    color: '#38bdf8',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 13.5,
+    lineHeight: 19,
+    color: '#d4d4d4',
+  },
+  codeTextDefault: {
+    color: '#d4d4d4', // VS Code standard text
+  },
+  codeComment: {
+    color: '#6a9955', // VS Code green
+    fontStyle: 'italic',
+  },
+  codeString: {
+    color: '#ce9178', // VS Code brown-orange string
+  },
+  codeKeyword: {
+    color: '#c586c0', // VS Code purple keyword
+    fontWeight: '600',
+  },
+  codeNumber: {
+    color: '#b5cea8', // VS Code light green number
+  },
+  codeTag: {
+    color: '#569cd6', // VS Code blue XML/HTML tag
+    fontWeight: '600',
+  },
+  codeFunction: {
+    color: '#dcdcaa', // VS Code yellow function name
   },
 });
