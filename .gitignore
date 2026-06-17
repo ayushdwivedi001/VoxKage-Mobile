@@ -26,3 +26,9 @@ Thumbs.db
 *.egg-info/
 dist/
 build/
+
+# Frontend (Node/Expo)
+node_modules/
+.expo/
+web-build/
+*.tsbuildinfo
