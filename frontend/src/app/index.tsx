@@ -120,6 +120,7 @@ export default function ChatScreen() {
   const [projectToRename, setProjectToRename] = useState<{ id: string; name: string } | null>(null);
   const [renameProjectName, setRenameProjectName] = useState('');
   const [playgroundView, setPlaygroundView] = useState<'list' | 'preview'>('list');
+  const [messageProjectIds, setMessageProjectIds] = useState<Record<string, string>>({});
 
   // Animated Drawers
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -746,15 +747,21 @@ window.onresize = () => {
         } else if (data.type === 'done') {
           setStreamingText((currText) => {
             if (currText.trim()) {
+              const assistantMessageId = generateRandomId('assistant');
+              const editingId = activeEditingProjectIdRef.current;
+              
+              if (editingId) {
+                setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
+              }
+
               setMessages((prev) => {
                 const updated = [
                   ...prev,
-                  { id: generateRandomId('assistant'), role: 'assistant' as const, content: currText },
+                  { id: assistantMessageId, role: 'assistant' as const, content: currText },
                 ];
                 scanMessagesForPlayground(updated);
 
                 // Auto-save code block updates to the active editing project if refining
-                const editingId = activeEditingProjectIdRef.current;
                 if (editingId) {
                   const htmlMatch = currText.match(/```html\n([\s\S]*?)```/i);
                   const cssMatch = currText.match(/```css\n([\s\S]*?)```/i);
@@ -830,7 +837,7 @@ window.onresize = () => {
     return /```html\n|```css\n|```javascript\n|```js\n/i.test(text);
   };
 
-  const handleOpenCodeInPlayground = async (content: string) => {
+  const handleOpenCodeInPlayground = async (content: string, messageId: string) => {
     const htmlMatch = content.match(/```html\n([\s\S]*?)```/i);
     const cssMatch = content.match(/```css\n([\s\S]*?)```/i);
     const jsMatch = content.match(/```javascript\n([\s\S]*?)```/i) || content.match(/```js\n([\s\S]*?)```/i);
@@ -849,10 +856,16 @@ window.onresize = () => {
     const projName = session ? `Playground - ${session.name}` : 'Playground Preview';
     setPlaygroundProjectName(projName);
 
+    // Get existing project ID associated with this message card, if any
+    const existingProjectId = messageProjectIds[messageId] || null;
+
     // Save project to backend
-    const savedId = await handleSaveProject(projName, htmlCode, cssCode, jsCode, playgroundProjectId);
+    const savedId = await handleSaveProject(projName, htmlCode, cssCode, jsCode, existingProjectId);
     if (savedId) {
       setPlaygroundProjectId(savedId);
+      if (!existingProjectId) {
+        setMessageProjectIds((prev) => ({ ...prev, [messageId]: savedId }));
+      }
     }
     
     // Open the drawer
@@ -946,6 +959,18 @@ window.onresize = () => {
       ? projects.find(p => p.id === activeEditingProjectId) 
       : null;
 
+    // Generate current local date/time string on client to bypass server timezone issues
+    const clientTimeStr = new Date().toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+
     setMessages((prev) => [
       ...prev,
       { id: generateRandomId('user'), role: 'user', content: userQuery },
@@ -960,6 +985,7 @@ window.onresize = () => {
         JSON.stringify({
           message: userQuery,
           model: activeModel,
+          client_time: clientTimeStr,
           active_project: activeProject ? {
             id: activeProject.id,
             name: activeProject.name,
@@ -970,13 +996,22 @@ window.onresize = () => {
         })
       );
     } else {
-      connectWebSocket(targetSessionId || '', token || '', backendUrl);
-      setTimeout(() => {
+      // Connect only if there is no socket or if it's closed/closing
+      if (!wsRef.current || (wsRef.current.readyState !== WebSocket.OPEN && wsRef.current.readyState !== WebSocket.CONNECTING)) {
+        connectWebSocket(targetSessionId || '', token || '', backendUrl);
+      }
+      
+      // Poll connection status until open or timeout (5s)
+      let checks = 0;
+      const maxChecks = 25; // 25 * 200ms = 5000ms
+      const interval = setInterval(() => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          clearInterval(interval);
           wsRef.current.send(
             JSON.stringify({
               message: userQuery,
               model: activeModel,
+              client_time: clientTimeStr,
               active_project: activeProject ? {
                 id: activeProject.id,
                 name: activeProject.name,
@@ -987,11 +1022,15 @@ window.onresize = () => {
             })
           );
         } else {
-          showAlert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
-          setLoading(false);
-          setThinkingStatus(null);
+          checks++;
+          if (checks >= maxChecks) {
+            clearInterval(interval);
+            showAlert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
+            setLoading(false);
+            setThinkingStatus(null);
+          }
         }
-      }, 1000);
+      }, 200);
     }
   };
 
@@ -1219,7 +1258,7 @@ window.onresize = () => {
         </View>
 
         {/* Chat Feed */}
-        {isNewChat && messages.length === 0 ? (
+        {messages.length === 0 && !inputText.trim() ? (
           <View style={styles.welcomeContainer}>
             <LogoV size={72} />
             <Text style={styles.welcomeText}>How can I help you today, Sir?</Text>
@@ -1305,7 +1344,7 @@ window.onresize = () => {
                       {hasCodeBlocks(item.content) && (
                         <TouchableOpacity
                           style={styles.openPlaygroundBubbleBtn}
-                          onPress={() => handleOpenCodeInPlayground(item.content)}
+                          onPress={() => handleOpenCodeInPlayground(item.content, item.id)}
                         >
                           <Ionicons name="play-circle-outline" size={14} color="#60a5fa" />
                           <Text style={styles.openPlaygroundBubbleBtnText}>Open in Playground</Text>

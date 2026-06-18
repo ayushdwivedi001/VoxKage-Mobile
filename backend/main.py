@@ -364,12 +364,13 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
         messages_history = get_session_messages(session_id)
 
         while True:
-            # Receive user text query
+             # Receive user text query
             data = await websocket.receive_text()
             payload_data = json.loads(data)
             query = payload_data.get("message", "").strip()
             model_key = payload_data.get("model", "deepseek-flash")
             active_project = payload_data.get("active_project", None)
+            client_time = payload_data.get("client_time", None)
 
             if not query:
                 continue
@@ -391,7 +392,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 model_key=model_key,
                 history=formatted_history,
                 manager_ref=manager,
-                active_project=active_project
+                active_project=active_project,
+                client_time=client_time
             )
             
             async for chunk_sse in async_generator:

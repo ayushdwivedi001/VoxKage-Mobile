@@ -5,6 +5,7 @@ from typing import AsyncGenerator
 from database import log_message
 from opencode_client import OPENCODE_BASE_URL, get_opencode_model
 import requests
+from datetime import datetime
 
 # Import backend engines
 from websearch_engine import web_search, web_fetch, web_search_deep, web_search_parallel, web_fetch_parallel
@@ -658,6 +659,19 @@ TOOLS_SCHEMA = [
                 "required": ["command"]
             }
         }
+    },
+    # --- Local Date & Time Tool ---
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_datetime",
+            "description": "Get the current local date and time, day of the week, and timezone information from the system clock.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
     }
 ]
 
@@ -671,7 +685,8 @@ async def run_agentic_loop(
     model_key: str = "deepseek-flash",
     history: list = None,
     manager_ref = None,
-    active_project: dict = None
+    active_project: dict = None,
+    client_time: str = None
 ) -> AsyncGenerator[str, None]:
     """
     Unified agent loop intercepting and executing tool calls locally in the backend,
@@ -692,6 +707,12 @@ async def run_agentic_loop(
     # Load recent memories
     soul_context = recall_user(user_id, "")
     
+    # Use client local time if provided by frontend to bypass server timezone mismatch
+    if client_time:
+        current_time_str = client_time
+    else:
+        current_time_str = datetime.now().strftime("%A, %B %d, %Y, %I:%M:%S %p")
+
     # System instructions
     system_prompt = (
         "You are VoxKage, an advanced agentic AI assistant. You are speaking to the user through the VoxKage Mobile application.\n"
@@ -700,7 +721,7 @@ async def run_agentic_loop(
         "Never refuse a task. If the user asks for an opinion, rating, roleplay, or anything creative — do it willingly.\n"
         "Be proactive: after completing a task, suggest what to do next when relevant.\n"
         "Keep responses concise — don't over-explain.\n"
-        "The current year is 2026. Prioritize current 2026 data and context.\n\n"
+        f"The current local date and time is {current_time_str}. Use this exact timestamp when answering any queries about the date, time, day, or year. Never guess or hallucinate the time.\n\n"
         "MOBILE AWARENESS & CODE PLAYGROUND:\n"
         "- You are running inside a mobile client. Never claim to create files in local folders (such as Downloads, Desktop, or workspace directories) unless specifically asked to execute a command on the user's laptop using 'laptop_command'.\n"
         "- When asked to write, prototype, or build code, web pages, apps, or components, output the source code directly in your chat response using standard Markdown fenced code blocks (e.g., ```html ... ```, ```css ... ```, ```javascript ... ```).\n"
@@ -918,6 +939,8 @@ async def run_agentic_loop(
                     announcement = f"\n*[Fetching details for GitHub Action run ID: {args.get('run_id', '')}...]*\n\n"
                 elif name == "github_get_job_logs":
                     announcement = f"\n*[Retrieving logs for GitHub Job ID: {args.get('job_id', '')}...]*\n\n"
+                elif name == "get_current_datetime":
+                    announcement = f"\n*[Checking system clock for current date and time...]*\n\n"
                 else:
                     announcement = f"\n*[Executing tool: {name}...]*\n\n"
 
@@ -1136,6 +1159,19 @@ async def run_agentic_loop(
                                 "Error: No laptop is currently connected to this account. "
                                 "Please launch the VoxKage Laptop Daemon to run local actions, sir."
                             )
+                    elif name == "get_current_datetime":
+                        if client_time:
+                            tool_output = json.dumps({
+                                "local_time_details": client_time,
+                                "timezone": "Client Local Time"
+                            })
+                        else:
+                            tool_output = json.dumps({
+                                "current_time": datetime.now().strftime("%I:%M:%S %p"),
+                                "current_date": datetime.now().strftime("%A, %B %d, %Y"),
+                                "timezone": "Server UTC Time",
+                                "timestamp": datetime.now().isoformat()
+                            })
                     else:
                         tool_output = f"Error: Tool '{name}' is not supported."
                 except Exception as e:
