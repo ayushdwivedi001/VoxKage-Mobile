@@ -136,54 +136,182 @@ function highlightVSCode(code: string, language: string) {
   return elements;
 }
 
+function renderTable(tableLines: string[], keyBase: number) {
+  // 1. Detect if it's a valid table by checking divider format on the second line
+  const dividerLine = tableLines[1] || '';
+  const isDivider = /^[|:\s-]+$/.test(dividerLine);
+  if (!isDivider) {
+    // Fallback if not a real table
+    return (
+      <View key={`table-fallback-${keyBase}`} style={styles.tableFallbackContainer}>
+        {tableLines.map((line, idx) => (
+          <Text key={`line-tbl-fail-${idx}`} style={styles.bodyText}>
+            {renderInlineSpans(line)}
+          </Text>
+        ))}
+      </View>
+    );
+  }
+
+  // Parse Alignments
+  const alignments: ('left' | 'center' | 'right')[] = [];
+  const divParts = dividerLine.split('|');
+  if (divParts[0] === '') divParts.shift();
+  if (divParts[divParts.length - 1] === '') divParts.pop();
+  divParts.forEach(part => {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(':') && trimmed.endsWith(':')) {
+      alignments.push('center');
+    } else if (trimmed.endsWith(':')) {
+      alignments.push('right');
+    } else {
+      alignments.push('left');
+    }
+  });
+
+  // Parse Headers
+  const headerParts = tableLines[0].split('|');
+  if (headerParts[0] === '') headerParts.shift();
+  if (headerParts[headerParts.length - 1] === '') headerParts.pop();
+  const headers = headerParts.map(h => h.trim());
+
+  // Parse Rows
+  const rows: string[][] = [];
+  for (let j = 2; j < tableLines.length; j++) {
+    const rowParts = tableLines[j].split('|');
+    if (rowParts[0] === '') rowParts.shift();
+    if (rowParts[rowParts.length - 1] === '') rowParts.pop();
+    rows.push(rowParts.map(r => r.trim()));
+  }
+
+  const getCellWidth = (index: number) => {
+    return index === 0 ? 150 : 85;
+  };
+
+  const getAlignStyle = (index: number) => {
+    const align = alignments[index] || 'left';
+    return {
+      textAlign: align,
+      alignSelf: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start'
+    } as const;
+  };
+
+  return (
+    <View key={`table-${keyBase}`} style={styles.tableWrapper}>
+      <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} style={styles.tableScroll}>
+        <View style={styles.tableContainer}>
+          {/* Header Row */}
+          <View style={styles.tableHeaderRow}>
+            {headers.map((header, idx) => (
+              <View key={`th-${idx}`} style={[styles.tableHeaderCell, { width: getCellWidth(idx) }]}>
+                <Text style={[styles.tableHeaderText, getAlignStyle(idx)]}>
+                  {header}
+                </Text>
+              </View>
+            ))}
+          </View>
+          
+          {/* Data Rows */}
+          {rows.map((row, rowIdx) => (
+            <View 
+              key={`tr-${rowIdx}`} 
+              style={[
+                styles.tableRow, 
+                rowIdx % 2 === 1 ? styles.tableRowOdd : styles.tableRowEven
+              ]}
+            >
+              {headers.map((_, colIdx) => {
+                const cellValue = row[colIdx] || '';
+                return (
+                  <View key={`td-${rowIdx}-${colIdx}`} style={[styles.tableCell, { width: getCellWidth(colIdx) }]}>
+                    <Text style={[styles.tableCellText, getAlignStyle(colIdx)]}>
+                      {renderInlineSpans(cellValue)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
 function renderTextWithInlineFormatting(rawText: string) {
   const lines = rawText.split('\n');
-
-  return lines.map((line, lineIndex) => {
+  const renderedElements = [];
+  
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    
+    // Check if it's a table row (starts with | and has pipes)
+    if (line.trim().startsWith('|')) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      
+      if (tableLines.length >= 2) {
+        renderedElements.push(renderTable(tableLines, i));
+      } else {
+        tableLines.forEach((tblLine, idx) => {
+          renderedElements.push(
+            <Text key={`line-tbl-fail-${i}-${idx}`} style={styles.bodyText}>
+              {renderInlineSpans(tblLine)}
+            </Text>
+          );
+        });
+      }
+      continue;
+    }
+    
     if (line.startsWith('#')) {
       const level = line.match(/^#+/)?.[0].length || 1;
       const cleanText = line.replace(/^#+\s*/, '');
       const headerStyle =
         level === 1 ? styles.h1 : level === 2 ? styles.h2 : styles.h3;
-      return (
-        <Text key={`h-${lineIndex}`} style={[styles.header, headerStyle]}>
+      renderedElements.push(
+        <Text key={`h-${i}`} style={[styles.header, headerStyle]}>
           {renderInlineSpans(cleanText)}
         </Text>
       );
-    }
-
-    if (line.startsWith('- ') || line.startsWith('* ')) {
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
       const cleanText = line.substring(2);
-      return (
-        <View key={`bullet-${lineIndex}`} style={styles.bulletRow}>
+      renderedElements.push(
+        <View key={`bullet-${i}`} style={styles.bulletRow}>
           <Text style={styles.bulletDot}>•</Text>
           <Text style={styles.bulletText}>{renderInlineSpans(cleanText)}</Text>
         </View>
       );
+    } else {
+      const numListMatch = line.match(/^(\d+)\.\s(.*)/);
+      if (numListMatch) {
+        const num = numListMatch[1];
+        const cleanText = numListMatch[2];
+        renderedElements.push(
+          <View key={`num-${i}`} style={styles.bulletRow}>
+            <Text style={styles.bulletNum}>{num}.</Text>
+            <Text style={styles.bulletText}>{renderInlineSpans(cleanText)}</Text>
+          </View>
+        );
+      } else if (line.trim() === '') {
+        renderedElements.push(<View key={`empty-${i}`} style={styles.emptyLine} />);
+      } else {
+        renderedElements.push(
+          <Text key={`line-${i}`} style={styles.bodyText}>
+            {renderInlineSpans(line)}
+          </Text>
+        );
+      }
     }
-
-    const numListMatch = line.match(/^(\d+)\.\s(.*)/);
-    if (numListMatch) {
-      const num = numListMatch[1];
-      const cleanText = numListMatch[2];
-      return (
-        <View key={`num-${lineIndex}`} style={styles.bulletRow}>
-          <Text style={styles.bulletNum}>{num}.</Text>
-          <Text style={styles.bulletText}>{renderInlineSpans(cleanText)}</Text>
-        </View>
-      );
-    }
-
-    if (line.trim() === '') {
-      return <View key={`empty-${lineIndex}`} style={styles.emptyLine} />;
-    }
-
-    return (
-      <Text key={`line-${lineIndex}`} style={styles.bodyText}>
-        {renderInlineSpans(line)}
-      </Text>
-    );
-  });
+    
+    i++;
+  }
+  
+  return renderedElements;
 }
 
 function renderInlineSpans(text: string) {
@@ -362,4 +490,64 @@ const styles = StyleSheet.create({
   codeFunction: {
     color: '#dcdcaa', // VS Code yellow function name
   },
+  tableWrapper: {
+    marginVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    backgroundColor: '#0c1222',
+    overflow: 'hidden',
+  },
+  tableScroll: {
+    width: '100%',
+  },
+  tableContainer: {
+    flexDirection: 'column',
+  },
+  tableHeaderRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 2,
+    borderBottomColor: '#1e293b',
+    backgroundColor: '#0f172a',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  tableHeaderCell: {
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+  },
+  tableHeaderText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(30, 41, 59, 0.5)',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  tableRowEven: {
+    backgroundColor: '#0c1222',
+  },
+  tableRowOdd: {
+    backgroundColor: '#0f172a',
+  },
+  tableCell: {
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+  },
+  tableCellText: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  tableFallbackContainer: {
+    marginVertical: 6,
+    paddingHorizontal: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: '#ef4444',
+  },
 });
+
