@@ -45,6 +45,9 @@ def recall_user(user_id: str, query: str = "") -> str:
     query_words = query.lower().split()
     for m in memories:
         if not query_words:
+            # Only include core personalization categories by default to prevent token bloat
+            if m["category"] not in ["identity", "preferences", "habits", "notes"]:
+                continue
             filtered.append(m)
             continue
         text = f"{m['category']} {m['key']} {m['value']}".lower()
