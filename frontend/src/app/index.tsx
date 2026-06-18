@@ -9,10 +9,7 @@ import {
   Platform,
   Alert,
   FlatList,
-  LogBox,
 } from 'react-native';
-
-LogBox.ignoreLogs(['Cannot record touch end without a touch start']);
 
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -727,23 +724,6 @@ window.onresize = () => {
         const data = JSON.parse(event.data);
         if (data.type === 'token') {
           updateStreamingText((prev) => prev + data.content);
-        } else if (data.type === 'error') {
-          let errorMsg = data.content;
-          if (errorMsg && errorMsg.includes('Upstream error:')) {
-            try {
-              const rawJson = errorMsg.substring(errorMsg.indexOf('Upstream error:') + 'Upstream error:'.length).trim();
-              const parsed = JSON.parse(rawJson);
-              if (parsed?.error?.message) {
-                errorMsg = parsed.error.message;
-              }
-            } catch (e) {
-              // fallback to raw string
-            }
-          }
-          showAlert('Engine Error, Sir', errorMsg);
-          setLoading(false);
-          setThinkingStatus(null);
-          updateStreamingText('');
         } else if (data.type === 'hud_log') {
           setThinkingStatus(data.content);
         } else if (data.type === 'laptop_log') {
@@ -1354,8 +1334,6 @@ window.onresize = () => {
             thinkingStatus={thinkingStatus}
             handleOpenCodeInPlayground={handleOpenCodeInPlayground}
             messageProjectIds={messageProjectIds}
-            token={token}
-            backendUrl={backendUrl}
           />
         )}
 
