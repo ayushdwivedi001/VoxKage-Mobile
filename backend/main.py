@@ -633,6 +633,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
             model_key = payload_data.get("model", "deepseek-flash")
             active_project = payload_data.get("active_project", None)
             client_time = payload_data.get("client_time", None)
+            variant = payload_data.get("variant", "High")
 
             if not query:
                 continue
@@ -656,7 +657,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 history=formatted_history,
                 manager_ref=manager,
                 active_project_box=active_project_box,
-                client_time=client_time
+                client_time=client_time,
+                variant=variant
             )
             
             async for chunk_sse in async_generator:

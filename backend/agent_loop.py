@@ -918,6 +918,49 @@ def ensure_active_project(user_id: str, session_id: str, active_project_box: lis
     sync_workspace_to_local(project_id, new_proj.get("files") or {})
     return project_id
 
+def get_variant_overrides(variant: str) -> dict:
+    v = (variant or "High").upper()
+    if v == "LOW":
+        return {
+            "temperature": 0.1,
+            "max_tokens": 2048,
+            "top_p": 0.9,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0
+        }
+    elif v == "MEDIUM":
+        return {
+            "temperature": 0.4,
+            "max_tokens": 4096,
+            "top_p": 0.95,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0
+        }
+    elif v == "XHIGH":
+        return {
+            "temperature": 0.85,
+            "max_tokens": 16384,
+            "top_p": 1.0,
+            "presence_penalty": 0.1,
+            "frequency_penalty": 0.1
+        }
+    elif v == "MAX":
+        return {
+            "temperature": 1.0,
+            "max_tokens": 32768,
+            "top_p": 1.0,
+            "presence_penalty": 0.2,
+            "frequency_penalty": 0.2
+        }
+    else: # HIGH
+        return {
+            "temperature": 0.7,
+            "max_tokens": 8192,
+            "top_p": 0.95,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0
+        }
+
 async def run_agentic_loop(
     prompt: str,
     user_id: str,
@@ -926,7 +969,8 @@ async def run_agentic_loop(
     history: list = None,
     manager_ref = None,
     active_project_box: list = None,
-    client_time: str = None
+    client_time: str = None,
+    variant: str = "High"
 ) -> AsyncGenerator[str, None]:
     if active_project_box is None:
         active_project_box = [None]
@@ -952,7 +996,8 @@ async def run_agentic_loop(
             history=history,
             manager_ref=manager_ref,
             active_project_box=active_project_box,
-            client_time=client_time
+            client_time=client_time,
+            variant=variant
         ):
             yield chunk
     finally:
@@ -986,7 +1031,8 @@ async def _run_agentic_loop_impl(
     history: list = None,
     manager_ref = None,
     active_project_box: list = None,
-    client_time: str = None
+    client_time: str = None,
+    variant: str = "High"
 ) -> AsyncGenerator[str, None]:
     """
     Unified agent loop intercepting and executing tool calls locally in the backend,
@@ -1098,9 +1144,10 @@ async def _run_agentic_loop_impl(
             "messages": messages,
             "tools": TOOLS_SCHEMA,
             "tool_choice": "auto",
-            "temperature": 0.7,
             "stream": True
         }
+        # Apply reasoning depth overrides
+        payload.update(get_variant_overrides(variant))
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:

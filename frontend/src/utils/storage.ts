@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 const BACKEND_URL_KEY = 'voxkage_backend_url';
 const TOKEN_KEY = 'voxkage_token';
 const EMAIL_KEY = 'voxkage_email';
+const FAVORITES_KEY = 'voxkage_favorite_models';
 
 export const DEFAULT_BACKEND_URL = 'https://shinayush-voxkage-mobile-backend.hf.space';
 
@@ -101,6 +102,33 @@ export const storage = {
       }
     } catch (e) {
       console.error('Error clearing auth storage', e);
+    }
+  },
+
+  async getFavoriteModels(): Promise<string[]> {
+    try {
+      let data = '';
+      if (Platform.OS === 'web') {
+        data = localStorage.getItem(FAVORITES_KEY) || '[]';
+      } else {
+        data = await SecureStore.getItemAsync(FAVORITES_KEY) || '[]';
+      }
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  },
+
+  async setFavoriteModels(favorites: string[]): Promise<void> {
+    try {
+      const data = JSON.stringify(favorites);
+      if (Platform.OS === 'web') {
+        localStorage.setItem(FAVORITES_KEY, data);
+      } else {
+        await SecureStore.setItemAsync(FAVORITES_KEY, data);
+      }
+    } catch (e) {
+      console.error('Error saving favorite models', e);
     }
   }
 };

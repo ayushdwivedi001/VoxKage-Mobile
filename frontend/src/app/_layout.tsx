@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Platform, Dimensions } from 'react-native';
+import { StyleSheet, View, Platform } from 'react-native';
 
 export default function RootLayout() {
   // If previewing in Web, wrap in a gorgeous centered phone frame to look like a mobile app

@@ -23,6 +23,7 @@ interface ChatInputProps {
   activeEditingProjectId: string | null;
   projects: any[];
   setActiveEditingProjectId: (id: string | null) => void;
+  handleStopGeneration: () => void;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -45,6 +46,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   activeEditingProjectId,
   projects,
   setActiveEditingProjectId,
+  handleStopGeneration,
 }) => {
   return (
     <View style={styles.inputAreaContainer}>
@@ -57,31 +59,33 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       )}
       {showVariantDropdown && (
         <View style={styles.variantDropdown}>
-          {VARIANTS.map((v, i) => (
-            <TouchableOpacity
-              key={v}
-              style={[
-                styles.variantDropdownItem,
-                activeVariantIndex === i && styles.variantDropdownItemActive,
-              ]}
-              onPress={() => {
-                setActiveVariantIndex(i);
-                setShowVariantDropdown(false);
-              }}
-            >
-              <Text
+          {VARIANTS.map((v, i) => {
+            return (
+              <TouchableOpacity
+                key={v}
                 style={[
-                  styles.variantDropdownText,
-                  activeVariantIndex === i && styles.variantDropdownTextActive,
+                  styles.variantDropdownItem,
+                  activeVariantIndex === i && styles.variantDropdownItemActive,
                 ]}
+                onPress={() => {
+                  setActiveVariantIndex(i);
+                  setShowVariantDropdown(false);
+                }}
               >
-                {v}
-              </Text>
-              {activeVariantIndex === i && (
-                <Ionicons name="checkmark" size={12} color="#60a5fa" />
-              )}
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[
+                    styles.variantDropdownText,
+                    activeVariantIndex === i && styles.variantDropdownTextActive,
+                  ]}
+                >
+                  {v}
+                </Text>
+                {activeVariantIndex === i && (
+                  <Ionicons name="checkmark" size={12} color="#60a5fa" />
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       )}
 
@@ -166,19 +170,34 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={handleSendMessage}
-          style={styles.inputSendBtn}
-          disabled={loading}
-        >
-          <View style={[styles.sendCircle, inputText.trim() && styles.sendCircleActive]}>
-            <Ionicons
-              name="arrow-up"
-              size={16}
-              color={inputText.trim() ? '#ffffff' : '#475569'}
-            />
-          </View>
-        </TouchableOpacity>
+        {loading ? (
+          <TouchableOpacity
+            onPress={handleStopGeneration}
+            style={styles.inputSendBtn}
+          >
+            <View style={[styles.sendCircle, { backgroundColor: '#ef4444' }]}>
+              <Ionicons
+                name="square"
+                size={12}
+                color="#ffffff"
+              />
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={handleSendMessage}
+            style={styles.inputSendBtn}
+            disabled={!inputText.trim()}
+          >
+            <View style={[styles.sendCircle, inputText.trim() && styles.sendCircleActive]}>
+              <Ionicons
+                name="arrow-up"
+                size={16}
+                color={inputText.trim() ? '#ffffff' : '#475569'}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );

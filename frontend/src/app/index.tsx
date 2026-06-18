@@ -46,11 +46,18 @@ export default function ChatScreen() {
   const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
   const [isNewChat, setIsNewChat] = useState(true);
 
-  // Models State
-  const [models, setModels] = useState<string[]>(['deepseek-v4-flash-free', 'gemini-2.5-flash', 'claude-3.5-sonnet']);
+  // Models & Variant State
+  const [models, setModels] = useState<string[]>([
+    'deepseek-v4-flash-free',
+    'deepseek-v4-flash',
+    'deepseek-v4-pro',
+    'gemini-2.5-flash',
+    'claude-3.5-sonnet'
+  ]);
   const [activeModel, setActiveModel] = useState('deepseek-v4-flash-free');
   const VARIANTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
   const [activeVariantIndex, setActiveVariantIndex] = useState(2); // default High
+  const [favorites, setFavorites] = useState<string[]>([]);
   const [showModelModal, setShowModelModal] = useState(false);
   const [showVariantDropdown, setShowVariantDropdown] = useState(false);
 
@@ -113,6 +120,16 @@ export default function ChatScreen() {
   useEffect(() => {
     projectsRef.current = projects;
   }, [projects]);
+
+
+
+  const handleToggleFavorite = async (modelId: string) => {
+    const nextFavs = favorites.includes(modelId)
+      ? favorites.filter(id => id !== modelId)
+      : [...favorites, modelId];
+    setFavorites(nextFavs);
+    await storage.setFavoriteModels(nextFavs);
+  };
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -318,27 +335,36 @@ window.onresize = () => {
   };
 
   async function fetchModels(url: string, jwtToken: string) {
+    const storedFavs = await storage.getFavoriteModels();
+    setFavorites(storedFavs);
+
+    let rawList: string[] = [];
     if (jwtToken.startsWith('mock-')) {
-      // Mock models list in simulation mode
-      setModels(['deepseek-v4-flash-free', 'gemini-2.5-flash', 'claude-3.5-sonnet', 'openai-gpt-4o']);
-      return;
-    }
-    try {
-      const response = await fetch(`${url}/models`, {
-        headers: { Authorization: `Bearer ${jwtToken}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        const modelList = Array.isArray(data) ? data : (data.models || []);
-        if (modelList.length > 0) {
-          setModels(modelList);
-          if (!modelList.includes(activeModel)) {
-            setActiveModel(modelList[0]);
-          }
+      rawList = [
+        'deepseek-v4-flash-free', 'deepseek-v4-flash', 'deepseek-v4-pro',
+        'gemini-2.5-flash', 'claude-3.5-sonnet',
+        'claude-opus-4-1', 'claude-opus-4-5', 'claude-opus-4-6', 'claude-opus-4-7', 'claude-opus-4-8'
+      ];
+    } else {
+      try {
+        const response = await fetch(`${url}/models`, {
+          headers: { Authorization: `Bearer ${jwtToken}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          rawList = Array.isArray(data) ? data : (data.models || []);
         }
+      } catch (e) {
+        console.error('Failed to fetch models from API', e);
       }
-    } catch (e) {
-      console.error('Failed to fetch models from API', e);
+    }
+
+    if (rawList.length > 0) {
+      setModels(rawList);
+      if (!rawList.includes(activeModel)) {
+        const fallback = rawList.includes('deepseek-v4-flash-free') ? 'deepseek-v4-flash-free' : rawList[0];
+        setActiveModel(fallback);
+      }
     }
   }
 
@@ -787,6 +813,38 @@ window.onresize = () => {
     };
   };
 
+  const handleStopGeneration = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    const currText = streamingTextRef.current;
+    updateStreamingText('');
+
+    if (currText.trim()) {
+      const assistantMessageId = generateRandomId('assistant');
+      const stoppedContent = currText + '\n\n*[Generation stopped, Sir.]*';
+      
+      const editingId = activeEditingProjectIdRef.current;
+      if (editingId) {
+        setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
+      }
+
+      setMessages((prev) => {
+        const updated = [
+          ...prev,
+          { id: assistantMessageId, role: 'assistant' as const, content: stoppedContent },
+        ];
+        scanMessagesForPlayground(updated);
+        return updated;
+      });
+    }
+
+    setLoading(false);
+    setThinkingStatus(null);
+  };
+
   const scanMessagesForPlayground = (msgList: ChatMessage[]) => {
     let htmlCode = '';
     let cssCode = '';
@@ -990,6 +1048,7 @@ window.onresize = () => {
         JSON.stringify({
           message: userQuery,
           model: activeModel,
+          variant: VARIANTS[activeVariantIndex],
           client_time: clientTimeStr,
           active_project: activeProject ? {
             id: activeProject.id,
@@ -1017,6 +1076,7 @@ window.onresize = () => {
             JSON.stringify({
               message: userQuery,
               model: activeModel,
+              variant: VARIANTS[activeVariantIndex],
               client_time: clientTimeStr,
               active_project: activeProject ? {
                 id: activeProject.id,
@@ -1298,6 +1358,7 @@ window.onresize = () => {
           activeEditingProjectId={activeEditingProjectId}
           projects={projects}
           setActiveEditingProjectId={setActiveEditingProjectId}
+          handleStopGeneration={handleStopGeneration}
         />
       </KeyboardAvoidingView>
 
@@ -1311,7 +1372,8 @@ window.onresize = () => {
         VARIANTS={VARIANTS}
         activeVariantIndex={activeVariantIndex}
         setActiveVariantIndex={setActiveVariantIndex}
-        formatModelName={formatModelName}
+        favorites={favorites}
+        onToggleFavorite={handleToggleFavorite}
       />
 
       {/* Voice pulse overlay */}
