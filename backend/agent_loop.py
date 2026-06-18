@@ -5,6 +5,7 @@ from typing import AsyncGenerator
 from database import log_message
 from opencode_client import OPENCODE_BASE_URL, get_opencode_model
 import requests
+import httpx
 from datetime import datetime
 
 # Import backend engines
@@ -821,6 +822,102 @@ TOOLS_SCHEMA = [
 # Shared laptop responses channel: { email: asyncio.Future }
 LAPTOP_CHANNELS = {}
 
+
+class HudStreamParser:
+    def __init__(self):
+        self.buffer = ""
+        self.hud_active = False
+        self.hud_content = ""
+
+    def feed(self, chunk: str) -> list:
+        self.buffer += chunk
+        output = []
+        
+        while True:
+            if not self.hud_active:
+                start_idx = self.buffer.find("[HUD:")
+                if start_idx == -1:
+                    possible_start = False
+                    for i in range(len("[HUD:")):
+                        suffix = "[HUD:"[:i+1]
+                        if self.buffer.endswith(suffix):
+                            possible_start = True
+                            emit_len = len(self.buffer) - len(suffix)
+                            if emit_len > 0:
+                                output.append({"type": "token", "content": self.buffer[:emit_len]})
+                                self.buffer = self.buffer[emit_len:]
+                            break
+                    if not possible_start:
+                        if self.buffer:
+                            output.append({"type": "token", "content": self.buffer})
+                            self.buffer = ""
+                    break
+                else:
+                    if start_idx > 0:
+                        output.append({"type": "token", "content": self.buffer[:start_idx]})
+                    self.buffer = self.buffer[start_idx + len("[HUD:"):]
+                    self.hud_active = True
+                    self.hud_content = ""
+            else:
+                end_idx = self.buffer.find("]")
+                if end_idx == -1:
+                    self.hud_content += self.buffer
+                    self.buffer = ""
+                    break
+                else:
+                    self.hud_content += self.buffer[:end_idx]
+                    self.buffer = self.buffer[end_idx + 1:]
+                    self.hud_active = False
+                    output.append({"type": "hud_log", "content": self.hud_content.strip()})
+                    self.hud_content = ""
+        return output
+
+    def flush(self) -> list:
+        output = []
+        if self.hud_active:
+            output.append({"type": "token", "content": f"[HUD:{self.hud_content}{self.buffer}"})
+        else:
+            if self.buffer:
+                output.append({"type": "token", "content": self.buffer})
+        self.buffer = ""
+        self.hud_active = False
+        self.hud_content = ""
+        return output
+
+def ensure_active_project(user_id: str, session_id: str, active_project_box: list) -> str:
+    if active_project_box and active_project_box[0] is not None:
+        project_id = active_project_box[0].get("id")
+        if project_id:
+            return project_id
+
+    from database import get_session, save_playground_project
+    try:
+        session_info = get_session(session_id, user_id)
+        session_name = session_info.get("name", "New Chat")
+    except Exception:
+        session_name = "Workspace Project"
+
+    project_name = f"Playground - {session_name}"
+    
+    new_proj = save_playground_project(
+        user_id=user_id,
+        project_id=None,
+        name=project_name,
+        html="<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Preview</title>\n  <link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n  <h1>Live Preview Workspace</h1>\n  <script src=\"script.js\"></script>\n</body>\n</html>",
+        css="body {\n  background-color: #0f172a;\n  color: #f8fafc;\n  font-family: sans-serif;\n  padding: 20px;\n}",
+        js="// JavaScript code here",
+        files={}
+    )
+    
+    if len(active_project_box) > 0:
+        active_project_box[0] = new_proj
+    else:
+        active_project_box.append(new_proj)
+        
+    project_id = new_proj.get("id")
+    sync_workspace_to_local(project_id, new_proj.get("files") or {})
+    return project_id
+
 async def run_agentic_loop(
     prompt: str,
     user_id: str,
@@ -828,9 +925,13 @@ async def run_agentic_loop(
     model_key: str = "deepseek-flash",
     history: list = None,
     manager_ref = None,
-    active_project: dict = None,
+    active_project_box: list = None,
     client_time: str = None
 ) -> AsyncGenerator[str, None]:
+    if active_project_box is None:
+        active_project_box = [None]
+
+    active_project = active_project_box[0]
     active_project_id = active_project.get("id") if active_project else None
     if active_project_id:
         files_dict = active_project.get("files") or {}
@@ -850,20 +951,22 @@ async def run_agentic_loop(
             model_key=model_key,
             history=history,
             manager_ref=manager_ref,
-            active_project=active_project,
+            active_project_box=active_project_box,
             client_time=client_time
         ):
             yield chunk
     finally:
-        if active_project_id:
+        final_project = active_project_box[0]
+        final_project_id = final_project.get("id") if final_project else None
+        if final_project_id:
             try:
-                final_files = get_workspace_files_dict(active_project_id)
+                final_files = get_workspace_files_dict(final_project_id)
                 if final_files:
                     from database import save_playground_project
                     save_playground_project(
                         user_id=user_id,
-                        project_id=active_project_id,
-                        name=active_project.get("name", "Workspace Project"),
+                        project_id=final_project_id,
+                        name=final_project.get("name", "Workspace Project"),
                         html=final_files.get("index.html", ""),
                         css=final_files.get("style.css", ""),
                         js=final_files.get("script.js", ""),
@@ -872,7 +975,8 @@ async def run_agentic_loop(
             except Exception as e:
                 print(f"Error saving workspace back to DB: {e}")
             finally:
-                cleanup_local_workspace(active_project_id)
+                cleanup_local_workspace(final_project_id)
+
 
 async def _run_agentic_loop_impl(
     prompt: str,
@@ -881,13 +985,14 @@ async def _run_agentic_loop_impl(
     model_key: str = "deepseek-flash",
     history: list = None,
     manager_ref = None,
-    active_project: dict = None,
+    active_project_box: list = None,
     client_time: str = None
 ) -> AsyncGenerator[str, None]:
     """
     Unified agent loop intercepting and executing tool calls locally in the backend,
     streaming output tokens to the mobile UI in real-time.
     """
+    active_project = active_project_box[0] if active_project_box else None
     active_project_id = active_project.get("id") if active_project else None
     api_key = os.getenv("OPENCODE_API_KEY")
     if not api_key:
@@ -921,8 +1026,6 @@ async def _run_agentic_loop_impl(
         f"The current local date and time is {current_time_str}. Use this exact timestamp when answering any queries about the date, time, day, or year. Never guess or hallucinate the time.\n\n"
         "MOBILE AWARENESS & CODE PLAYGROUND:\n"
         "- You are running inside a mobile client. Never claim to create files in local folders (such as Downloads, Desktop, or workspace directories) unless specifically asked to execute a command on the user's laptop using 'laptop_command'.\n"
-        "- When asked to write, prototype, or build code, web pages, apps, or components, output the source code directly in your chat response using standard Markdown fenced code blocks (e.g., ```html ... ```, ```css ... ```, ```javascript ... ```).\n"
-        "- The VoxKage Mobile app features a built-in interactive Code Playground drawer. When you output HTML/CSS/JS code, the user can instantly preview it in this Playground via an 'Open in Playground' button that automatically renders below your message.\n"
         "- Always ensure that code templates and mock pages you generate have a responsive, mobile-first design, as they will be displayed directly inside the phone screen preview.\n"
         "- CRITICAL: Every website, page, app, or component you generate MUST be fully responsive and optimized specifically for a phone/mobile viewport. Use media queries, flexbox, viewport meta tags, and mobile-friendly touch targets. Do not build desktop-only layouts.\n\n"
         f"--- USER SOUL PROFILE MEMORIES ---\n{soul_context}\n\n"
@@ -944,23 +1047,36 @@ async def _run_agentic_loop_impl(
             }
         for path in sorted(files_dict.keys()):
             files_list_str += f"- {path} ({len(files_dict[path])} chars)\n"
-
-        system_prompt += (
-            f"\n\n--- ACTIVE PLAYGROUND PROJECT IN CONTEXT ---\n"
-            f"You are currently working in a multi-file Agentic Workspace for the following Code Playground project:\n"
+        project_context_str = (
             f"Project ID: {active_project.get('id')}\n"
             f"Project Name: {active_project.get('name')}\n"
-            f"Workspace Files:\n{files_list_str}\n"
-            "COGNITIVE WORKFLOW FOR WORKSPACE REFINEMENT:\n"
-            "1. Plan: Analyze the workspace structure and determine which files need changes.\n"
-            "2. Read/Inspect: Use `workspace_read_file` to read files you need to understand or modify.\n"
-            "3. Action (Write/Edit): Use `workspace_write_file` or `workspace_edit_file` to create or modify files. Use `workspace_delete_file` if needed.\n"
-            "4. Syntax Check: Run `workspace_syntax_check` on modified files to verify no syntax errors exist.\n"
-            "5. Review & Correct: Review results and iterate if there are syntax errors.\n"
-            "IMPORTANT: When modifying, refining, or adding features, ALWAYS use these workspace tools to edit the files directly. "
-            "DO NOT write/output the entire code blocks in the chat bubble. The user wants the files updated in their workspace, "
-            "not a dump of source code in the chat. Tell the user what files you edited and what was accomplished."
+            f"Workspace Files:\n{files_list_str}"
         )
+    else:
+        project_context_str = (
+            "Project ID: (None - Calling any workspace tool will automatically initialize a new project workspace for this chat session)\n"
+            "Project Name: (None)\n"
+            "Workspace Files: (None - No files yet)"
+        )
+
+    system_prompt += (
+        f"\n\n--- ACTIVE PLAYGROUND PROJECT WORKSPACE ---\n"
+        f"{project_context_str}\n\n"
+        "COGNITIVE WORKFLOW FOR WORKSPACE REFINEMENT:\n"
+        "1. Plan: Analyze the workspace structure and determine which files need changes.\n"
+        "2. Read/Inspect: Use `workspace_read_file` to read files you need to understand or modify.\n"
+        "3. Action (Write/Edit): Use `workspace_write_file` or `workspace_edit_file` to create or modify files. Use `workspace_delete_file` if needed.\n"
+        "4. Syntax Check: ALWAYS run `workspace_syntax_check` on modified/created files to verify no syntax errors exist.\n"
+        "5. Review & Correct: Review results and iterate if there are syntax errors.\n\n"
+        "IMPORTANT RULES FOR CODING/VISUAL WORKFLOWS:\n"
+        "- When writing code, layout, styles, visualizations, mockups, or websites, you MUST use the workspace tools to edit the files directly. "
+        "DO NOT output the code blocks (such as ```html ... ```) in the chat bubble. The user wants the files updated in their workspace, "
+        "not a dump of source code in the chat.\n"
+        "- Standard workspace files are 'index.html', 'style.css', and 'script.js'. You must partition your files properly (keep styles in style.css, script logic in script.js) instead of nesting everything in a single index.html file.\n"
+        "- To show the user your active progress in real-time, you should output granular thought updates in the format `[HUD: <action>]` "
+        "(e.g., `[HUD: Designing the footer]`, `[HUD: Modifying style.css now]`) before or during file editing. The backend will intercept these and display them in the HUD thinking bubble.\n"
+        "- Once you create or edit any playground files, you MUST run `workspace_syntax_check` to ensure no errors exist before concluding. Tell the user what files you edited and what was accomplished."
+    )
 
     messages = [
         {
@@ -975,7 +1091,7 @@ async def _run_agentic_loop_impl(
 
     messages.append({"role": "user", "content": prompt})
 
-    max_iterations = 6
+    max_iterations = 12
     for iteration in range(max_iterations):
         payload = {
             "model": model_id,
@@ -987,48 +1103,58 @@ async def _run_agentic_loop_impl(
         }
 
         try:
-            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
-            if response.status_code != 200:
-                yield json.dumps({"type": "error", "content": f"Upstream error: {response.text}"})
-                return
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream("POST", url, headers=headers, json=payload) as response:
+                    if response.status_code != 200:
+                        error_body = await response.aread()
+                        yield json.dumps({"type": "error", "content": f"Upstream error: {error_body.decode('utf-8', errors='ignore')}"})
+                        return
 
-            current_tool_calls = []
-            assistant_text = ""
+                    current_tool_calls = []
+                    assistant_text = ""
+                    hud_parser = HudStreamParser()
 
-            for line in response.iter_lines():
-                if line:
-                    decoded = line.decode('utf-8')
-                    if decoded.startswith("data: "):
-                        data_str = decoded[6:].strip()
-                        if data_str == "[DONE]":
-                            break
-                        
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk["choices"][0]["delta"]
-                            
-                            # Accumulate tool calls
-                            if "tool_calls" in delta:
-                                tcalls = delta["tool_calls"]
-                                for tc in tcalls:
-                                    idx = tc.get("index", 0)
-                                    while len(current_tool_calls) <= idx:
-                                        current_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                    async for line in response.aiter_lines():
+                        if line:
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    break
+                                
+                                try:
+                                    chunk = json.loads(data_str)
+                                    delta = chunk["choices"][0]["delta"]
                                     
-                                    if tc.get("id"):
-                                        current_tool_calls[idx]["id"] = tc["id"]
-                                    if tc["function"].get("name"):
-                                        current_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
-                                    if tc["function"].get("arguments"):
-                                        current_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
-                            
-                            # Stream assistant content delta
-                            if delta.get("content"):
-                                content_delta = delta["content"]
-                                assistant_text += content_delta
-                                yield json.dumps({"type": "token", "content": content_delta})
-                        except:
-                            pass
+                                    # Accumulate tool calls
+                                    if "tool_calls" in delta:
+                                        tcalls = delta["tool_calls"]
+                                        for tc in tcalls:
+                                            idx = tc.get("index", 0)
+                                            while len(current_tool_calls) <= idx:
+                                                current_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                                            
+                                            if tc.get("id"):
+                                                current_tool_calls[idx]["id"] = tc["id"]
+                                            if tc["function"].get("name"):
+                                                current_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
+                                            if tc["function"].get("arguments"):
+                                                current_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
+                                    
+                                    # Stream assistant content delta
+                                    if delta.get("content"):
+                                        content_delta = delta["content"]
+                                        for packet in hud_parser.feed(content_delta):
+                                            yield json.dumps(packet)
+                                            if packet["type"] == "token":
+                                                assistant_text += packet["content"]
+                                except:
+                                    pass
+
+            # Flush any leftover tokens in HUD parser
+            for packet in hud_parser.flush():
+                yield json.dumps(packet)
+                if packet["type"] == "token":
+                    assistant_text += packet["content"]
 
             # Update conversation list
             if assistant_text:
@@ -1398,29 +1524,26 @@ async def _run_agentic_loop_impl(
                                 "timestamp": datetime.now().isoformat()
                             })
                     elif name == "workspace_list_files":
-                        if not active_project_id:
-                            tool_output = "Error: No active playground project in context."
-                        else:
-                            yield json.dumps({"type": "hud_log", "content": "Listing workspace files..."})
-                            base_dir = os.path.join("projects", str(active_project_id))
-                            files_list = []
-                            if os.path.exists(base_dir):
-                                for root, _, files in os.walk(base_dir):
-                                    for f in files:
-                                        full_path = os.path.join(root, f)
-                                        rel_path = os.path.relpath(full_path, base_dir).replace("\\", "/")
-                                        files_list.append(rel_path)
-                            tool_output = json.dumps({"files": sorted(files_list)})
+                        project_id = ensure_active_project(user_id, session_id, active_project_box)
+                        yield json.dumps({"type": "hud_log", "content": "Listing active workspace files..."})
+                        base_dir = os.path.join("projects", str(project_id))
+                        files_list = []
+                        if os.path.exists(base_dir):
+                            for root, _, files in os.walk(base_dir):
+                                for f in files:
+                                    full_path = os.path.join(root, f)
+                                    rel_path = os.path.relpath(full_path, base_dir).replace("\\", "/")
+                                    files_list.append(rel_path)
+                        tool_output = json.dumps({"files": sorted(files_list)})
 
                     elif name == "workspace_read_file":
                         file_path = args.get("file_path", "")
-                        if not active_project_id:
-                            tool_output = "Error: No active playground project in context."
-                        elif not file_path:
+                        if not file_path:
                             tool_output = "Error: file_path argument is required."
                         else:
+                            project_id = ensure_active_project(user_id, session_id, active_project_box)
                             yield json.dumps({"type": "hud_log", "content": f"Reading workspace file: {file_path}"})
-                            base_dir = os.path.join("projects", str(active_project_id))
+                            base_dir = os.path.join("projects", str(project_id))
                             try:
                                 safe_path = get_safe_workspace_path(base_dir, file_path)
                                 if os.path.exists(safe_path):
@@ -1435,13 +1558,12 @@ async def _run_agentic_loop_impl(
                     elif name == "workspace_write_file":
                         file_path = args.get("file_path", "")
                         content = args.get("content", "")
-                        if not active_project_id:
-                            tool_output = "Error: No active playground project in context."
-                        elif not file_path:
+                        if not file_path:
                             tool_output = "Error: file_path argument is required."
                         else:
+                            project_id = ensure_active_project(user_id, session_id, active_project_box)
                             yield json.dumps({"type": "hud_log", "content": f"Writing workspace file: {file_path}"})
-                            base_dir = os.path.join("projects", str(active_project_id))
+                            base_dir = os.path.join("projects", str(project_id))
                             try:
                                 safe_path = get_safe_workspace_path(base_dir, file_path)
                                 os.makedirs(os.path.dirname(safe_path), exist_ok=True)
@@ -1455,13 +1577,12 @@ async def _run_agentic_loop_impl(
                         file_path = args.get("file_path", "")
                         search_content = args.get("search_content", "")
                         replace_content = args.get("replace_content", "")
-                        if not active_project_id:
-                            tool_output = "Error: No active playground project in context."
-                        elif not file_path:
+                        if not file_path:
                             tool_output = "Error: file_path argument is required."
                         else:
+                            project_id = ensure_active_project(user_id, session_id, active_project_box)
                             yield json.dumps({"type": "hud_log", "content": f"Editing workspace file: {file_path}"})
-                            base_dir = os.path.join("projects", str(active_project_id))
+                            base_dir = os.path.join("projects", str(project_id))
                             try:
                                 safe_path = get_safe_workspace_path(base_dir, file_path)
                                 if os.path.exists(safe_path):
@@ -1481,13 +1602,12 @@ async def _run_agentic_loop_impl(
 
                     elif name == "workspace_delete_file":
                         file_path = args.get("file_path", "")
-                        if not active_project_id:
-                            tool_output = "Error: No active playground project in context."
-                        elif not file_path:
+                        if not file_path:
                             tool_output = "Error: file_path argument is required."
                         else:
+                            project_id = ensure_active_project(user_id, session_id, active_project_box)
                             yield json.dumps({"type": "hud_log", "content": f"Deleting workspace file: {file_path}"})
-                            base_dir = os.path.join("projects", str(active_project_id))
+                            base_dir = os.path.join("projects", str(project_id))
                             try:
                                 safe_path = get_safe_workspace_path(base_dir, file_path)
                                 if os.path.exists(safe_path):
@@ -1500,13 +1620,12 @@ async def _run_agentic_loop_impl(
 
                     elif name == "workspace_syntax_check":
                         file_path = args.get("file_path", "")
-                        if not active_project_id:
-                            tool_output = "Error: No active playground project in context."
-                        elif not file_path:
+                        if not file_path:
                             tool_output = "Error: file_path argument is required."
                         else:
+                            project_id = ensure_active_project(user_id, session_id, active_project_box)
                             yield json.dumps({"type": "hud_log", "content": f"Checking syntax of: {file_path}"})
-                            base_dir = os.path.join("projects", str(active_project_id))
+                            base_dir = os.path.join("projects", str(project_id))
                             try:
                                 safe_path = get_safe_workspace_path(base_dir, file_path)
                                 if not os.path.exists(safe_path):

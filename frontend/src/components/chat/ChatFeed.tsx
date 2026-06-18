@@ -19,6 +19,7 @@ interface ChatFeedProps {
   loading: boolean;
   thinkingStatus: string | null;
   handleOpenCodeInPlayground: (content: string, messageId: string) => void;
+  messageProjectIds: Record<string, string>;
 }
 
 const hasCodeBlocks = (text: string) => {
@@ -32,6 +33,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   loading,
   thinkingStatus,
   handleOpenCodeInPlayground,
+  messageProjectIds,
 }) => {
   const data = [
     ...messages,
@@ -78,7 +80,9 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
               <View style={styles.laptopLogCard}>
                 <View style={styles.laptopLogHeader}>
                   <Ionicons name="terminal-outline" size={13} color="#2563eb" />
-                  <Text style={styles.laptopLogTitle}>Laptop execution output</Text>
+                  <Text style={styles.laptopLogTitle}>
+                    {item.content.includes("WebView Rendering Error") ? "Playground Console" : "Laptop execution output"}
+                  </Text>
                 </View>
                 <Text style={styles.laptopLogText}>{item.content}</Text>
               </View>
@@ -101,19 +105,22 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             );
           }
 
+          const hasProject = !!messageProjectIds[item.id];
+          const hasBlocks = hasCodeBlocks(item.content);
+
           return (
             <View style={styles.assistantBubbleWrapper}>
               <View style={styles.assistantAvatar}>
                 <LogoV size={18} />
               </View>
-              <View style={[styles.assistantBubble, hasCodeBlocks(item.content) && { minWidth: 160 }]}>
+              <View style={[styles.assistantBubble, (hasBlocks || hasProject) && { minWidth: 160 }]}>
                 <MarkdownRenderer text={item.content} />
                 {item.id === 'streaming' && (
                   <View style={styles.typingIndicatorContainer}>
                     <ActivityIndicator size="small" color="#2563eb" />
                   </View>
                 )}
-                {hasCodeBlocks(item.content) && (
+                {(hasBlocks || hasProject) && (
                   <TouchableOpacity
                     style={styles.openPlaygroundBubbleBtn}
                     onPress={() => handleOpenCodeInPlayground(item.content, item.id)}

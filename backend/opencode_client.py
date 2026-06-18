@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import httpx
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -18,9 +19,9 @@ def get_opencode_model(model_key: str) -> str:
         return MODEL_MAP[model_key]
     return model_key
 
-def query_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history: list = None) -> str:
+async def query_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history: list = None) -> str:
     """
-    Standard synchronous query returning the full text block response.
+    Standard asynchronous query returning the full text block response.
     """
     api_key = os.getenv("OPENCODE_API_KEY")
     if not api_key:
@@ -64,14 +65,15 @@ def query_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history: 
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        else:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"OpenCode API returned an error: {response.text}"
-            )
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"OpenCode API returned an error: {response.text}"
+                )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query OpenCode Zen API: {str(e)}")
 

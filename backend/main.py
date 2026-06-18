@@ -316,6 +316,7 @@ def project_preview(
     project_id: str,
     file_path: str = "",
     token: str | None = None,
+    session_id: str | None = None,
     voxkage_preview_auth: str | None = Cookie(None)
 ):
     from fastapi import Response, Cookie
@@ -356,8 +357,65 @@ def project_preview(
     if normalized_path.startswith("../") or "/../" in normalized_path or normalized_path.startswith("/"):
         raise HTTPException(status_code=403, detail="Forbidden: Path traversal blocked, Sir.")
 
+    def inject_error_script(html_content: str) -> str:
+        if not session_id:
+            return html_content
+        inject_token = token or voxkage_preview_auth or ""
+        script = f"""
+<script>
+  (function() {{
+    const sessId = "{session_id}";
+    const tok = "{inject_token}";
+    window.onerror = function(message, source, lineno, colno, error) {{
+      const payload = {{
+        error_type: "webview_error",
+        message: String(message),
+        source: String(source),
+        lineno: lineno,
+        colno: colno
+      }};
+      fetch("/sessions/" + sessId + "/log_error", {{
+        method: "POST",
+        headers: {{
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + tok
+        }},
+        body: JSON.stringify(payload)
+      }}).catch(err => console.error("Error logging to backend", err));
+      return false;
+    }};
+    console.error = (function(oldError) {{
+      return function() {{
+        oldError.apply(console, arguments);
+        const msg = Array.from(arguments).map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+        const payload = {{
+          error_type: "console_error",
+          message: msg
+        }};
+        fetch("/sessions/" + sessId + "/log_error", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + tok
+          }},
+          body: JSON.stringify(payload)
+        }}).catch(err => console.error("Error logging to backend", err));
+      }};
+    }})(console.error);
+  }})();
+</script>
+"""
+        if "</head>" in html_content:
+            return html_content.replace("</head>", f"{script}\n</head>", 1)
+        elif "<body>" in html_content:
+            return html_content.replace("<body>", f"<body>\n{script}", 1)
+        return f"{script}\n{html_content}"
+
     if normalized_path in files:
         content = files[normalized_path]
+        if normalized_path.endswith(".html"):
+            content = inject_error_script(content)
+            
         mime_type, _ = mimetypes.guess_type(normalized_path)
         if not mime_type:
             if normalized_path.endswith(".html"):
@@ -384,6 +442,7 @@ def project_preview(
         html_files = [f for f in files.keys() if f.endswith(".html")]
         if html_files:
             content = files[html_files[0]]
+            content = inject_error_script(content)
             response = Response(content=content, media_type="text/html")
             if token:
                 response.set_cookie(key="voxkage_preview_auth", value=token, httponly=True, samesite="none", secure=True)
@@ -483,6 +542,41 @@ def get_models(user: str = Depends(get_current_user)):
     from opencode_client import list_opencode_models
     return list_opencode_models()
 
+class WebviewErrorPayload(BaseModel):
+    error_type: str
+    message: str
+    source: str | None = None
+    lineno: int | None = None
+    colno: int | None = None
+
+@app.post("/sessions/{session_id}/log_error")
+async def log_webview_error(
+    session_id: str,
+    payload: WebviewErrorPayload,
+    user: str = Depends(get_current_user)
+):
+    error_desc = f"⚠️ WebView Rendering Error:\n"
+    if payload.error_type == "webview_error":
+        error_desc += f"Error: {payload.message}\nFile: {payload.source}\nLine: {payload.lineno}, Col: {payload.colno}"
+    else:
+        error_desc += f"Console Error: {payload.message}"
+        
+    log_message(session_id, "laptop", error_desc)
+    
+    # Broadcast to user's active chats
+    if user in manager.active_chats:
+        ws_msg = json.dumps({
+            "type": "laptop_log",
+            "content": error_desc
+        })
+        for ws in manager.active_chats[user]:
+            try:
+                await ws.send_text(ws_msg)
+            except Exception:
+                pass
+                
+    return {"status": "success", "logged_message": error_desc}
+
 # --- File Upload & RAG Indexing Endpoint ---
 
 @app.post("/upload")
@@ -553,6 +647,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
 
             # Stream Agentic Loop response to client
             full_response = ""
+            active_project_box = [active_project]
             async_generator = run_agentic_loop(
                 prompt=query,
                 user_id=user,
@@ -560,7 +655,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 model_key=model_key,
                 history=formatted_history,
                 manager_ref=manager,
-                active_project=active_project,
+                active_project_box=active_project_box,
                 client_time=client_time
             )
             
@@ -584,7 +679,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 messages_history.append({"role": "assistant", "content": full_response})
 
             # Signal chunk stream complete
-            await websocket.send_text(json.dumps({"type": "done"}))
+            final_project_id = active_project_box[0].get("id") if active_project_box[0] else None
+            await websocket.send_text(json.dumps({"type": "done", "project_id": final_project_id}))
 
             # --- Auto-generate Session Title ---
             # If session is named "New Chat", generate a smart title using the first message
@@ -592,7 +688,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 generated_title = None
                 try:
                     title_prompt = f"Summarize this query into a short, creative 3-5 word title for a chat thread (do not include quotes): '{query}'"
-                    generated_title = query_opencode_zen(title_prompt, model_key).strip().replace('"', '')
+                    generated_title = (await query_opencode_zen(title_prompt, model_key)).strip().replace('"', '')
                     if not generated_title:
                         raise ValueError("Empty title returned")
                 except Exception as e:

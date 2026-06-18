@@ -31,6 +31,7 @@ interface PlaygroundDrawerProps {
   playgroundRevision: number;
   token: string | null;
   backendUrl: string;
+  currentSessionId: string | null;
 }
 
 export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
@@ -60,6 +61,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
   playgroundRevision,
   token,
   backendUrl,
+  currentSessionId,
 }) => {
   const [viewMode, setViewMode] = React.useState<'sandbox' | 'explorer' | 'fileviewer'>('sandbox');
   const [selectedFile, setSelectedFile] = React.useState<string | null>(null);
@@ -261,7 +263,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
                     key={`sb-${playgroundRevision}`}
                     src={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
                       ? undefined
-                      : `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}`
+                      : `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}&session_id=${currentSessionId || ''}`
                     }
                     srcDoc={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
                       ? compiledSandboxHtml
@@ -286,7 +288,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
                     originWhitelist={['*']}
                     source={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
                       ? { html: compiledSandboxHtml }
-                      : { uri: `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}` }
+                      : { uri: `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}&session_id=${currentSessionId || ''}` }
                     }
                     style={styles.webView}
                     javaScriptEnabled={true}
@@ -380,20 +382,72 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
                   </Text>
                 </View>
                 <ScrollView 
-                  style={{ flex: 1, backgroundColor: '#090d16', padding: 16 }}
-                  contentContainerStyle={{ paddingBottom: 40 }}
+                  style={{ flex: 1, backgroundColor: '#090d16' }}
+                  contentContainerStyle={{ paddingBottom: 40, flexDirection: 'row' }}
                 >
-                  <TextInput
-                    multiline
-                    editable={false}
-                    value={selectedFileContent}
-                    style={{
-                      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-                      color: '#e2e8f0',
-                      fontSize: 12.5,
-                      lineHeight: 20,
-                    }}
-                  />
+                  {/* Line Numbers Column */}
+                  <View style={{
+                    paddingVertical: 16,
+                    paddingLeft: 12,
+                    paddingRight: 8,
+                    backgroundColor: '#060910',
+                    borderRightWidth: 1,
+                    borderRightColor: '#1e293b',
+                    minWidth: 40,
+                    alignItems: 'flex-end',
+                  }}>
+                    {selectedFileContent.split('\n').map((_, idx) => (
+                      <Text
+                        key={idx}
+                        style={{
+                          fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                          color: '#475569',
+                          fontSize: 12.5,
+                          lineHeight: 20,
+                          // @ts-ignore
+                          userSelect: 'none',
+                        }}
+                      >
+                        {idx + 1}
+                      </Text>
+                    ))}
+                  </View>
+
+                  {/* Code Viewer TextInput Column */}
+                  <ScrollView
+                    horizontal
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingVertical: 16, paddingHorizontal: 16 }}
+                    showsHorizontalScrollIndicator={true}
+                  >
+                    <TextInput
+                      multiline
+                      editable={false}
+                      value={selectedFileContent}
+                      style={{
+                        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                        color: '#e2e8f0',
+                        fontSize: 12.5,
+                        lineHeight: 20,
+                        minWidth: 800,
+                        padding: 0,
+                        margin: 0,
+                        borderWidth: 0,
+                        borderColor: 'transparent',
+                        backgroundColor: 'transparent',
+                        ...Platform.select({
+                          web: {
+                            outlineStyle: 'none',
+                            borderStyle: 'none',
+                            backgroundColor: 'transparent',
+                            whiteSpace: 'pre',
+                            boxShadow: 'none',
+                          } as any,
+                          default: {}
+                        })
+                      }}
+                    />
+                  </ScrollView>
                 </ScrollView>
               </View>
             )}

@@ -96,6 +96,15 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList | null>(null);
   const activeEditingProjectIdRef = useRef<string | null>(null);
   const projectsRef = useRef<any[]>([]);
+  const streamingTextRef = useRef('');
+
+  const updateStreamingText = (text: string | ((prev: string) => string)) => {
+    setStreamingText((prev) => {
+      const next = typeof text === 'function' ? text(prev) : text;
+      streamingTextRef.current = next;
+      return next;
+    });
+  };
 
   useEffect(() => {
     activeEditingProjectIdRef.current = activeEditingProjectId;
@@ -466,7 +475,7 @@ window.onresize = () => {
     }
 
     if (!token || !backendUrl) return;
-    const original = projects.find((p) => p.id === projectId);
+    const original = projectsRef.current.find((p) => p.id === projectId);
     if (!original) return;
 
     try {
@@ -688,7 +697,7 @@ window.onresize = () => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'token') {
-          setStreamingText((prev) => prev + data.content);
+          updateStreamingText((prev) => prev + data.content);
         } else if (data.type === 'hud_log') {
           setThinkingStatus(data.content);
         } else if (data.type === 'laptop_log') {
@@ -711,60 +720,64 @@ window.onresize = () => {
             prev.map((s) => (s.id === sessionId ? { ...s, name: data.name } : s))
           );
         } else if (data.type === 'done') {
-          setStreamingText((currText) => {
-            if (currText.trim()) {
-              const assistantMessageId = generateRandomId('assistant');
-              const editingId = activeEditingProjectIdRef.current;
-              
+          const associatedProjectId = data.project_id || null;
+          const currText = streamingTextRef.current;
+          updateStreamingText('');
+          
+          if (currText.trim()) {
+            const assistantMessageId = generateRandomId('assistant');
+            const editingId = associatedProjectId || activeEditingProjectIdRef.current;
+            
+            if (editingId) {
+              setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
+            }
+
+            setMessages((prev) => {
+              const updated = [
+                ...prev,
+                { id: assistantMessageId, role: 'assistant' as const, content: currText },
+              ];
+              scanMessagesForPlayground(updated);
+
+              // Auto-save code block updates to the active editing project if refining
               if (editingId) {
-                setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
-              }
-
-              setMessages((prev) => {
-                const updated = [
-                  ...prev,
-                  { id: assistantMessageId, role: 'assistant' as const, content: currText },
-                ];
-                scanMessagesForPlayground(updated);
-
-                // Auto-save code block updates to the active editing project if refining
-                if (editingId) {
-                  const htmlMatch = currText.match(/```html\n([\s\S]*?)```/i);
-                  const cssMatch = currText.match(/```css\n([\s\S]*?)```/i);
-                  const jsMatch = currText.match(/```javascript\n([\s\S]*?)```/i) || currText.match(/```js\n([\s\S]*?)```/i);
+                const htmlMatch = currText.match(/```html\n([\s\S]*?)```/i);
+                const cssMatch = currText.match(/```css\n([\s\S]*?)```/i);
+                const jsMatch = currText.match(/```javascript\n([\s\S]*?)```/i) || currText.match(/```js\n([\s\S]*?)```/i);
+                
+                if (htmlMatch || cssMatch || jsMatch) {
+                  const htmlCode = htmlMatch ? htmlMatch[1] : '';
+                  const cssCode = cssMatch ? cssMatch[1] : '';
+                  const jsCode = jsMatch ? jsMatch[1] : '';
                   
-                  if (htmlMatch || cssMatch || jsMatch) {
-                    const htmlCode = htmlMatch ? htmlMatch[1] : '';
-                    const cssCode = cssMatch ? cssMatch[1] : '';
-                    const jsCode = jsMatch ? jsMatch[1] : '';
+                  const originalProj = projectsRef.current.find(p => p.id === editingId);
+                  if (originalProj) {
+                    const finalHtml = htmlCode || originalProj.html || '';
+                    const finalCss = cssCode || originalProj.css || '';
+                    const finalJs = jsCode || originalProj.js || '';
                     
-                    const originalProj = projectsRef.current.find(p => p.id === editingId);
-                    if (originalProj) {
-                      const finalHtml = htmlCode || originalProj.html || '';
-                      const finalCss = cssCode || originalProj.css || '';
-                      const finalJs = jsCode || originalProj.js || '';
-                      
-                      setPlaygroundHtml(finalHtml);
-                      setPlaygroundCss(finalCss);
-                      setPlaygroundJs(finalJs);
-                      setPlaygroundRevision((prev) => prev + 1);
+                    setPlaygroundHtml(finalHtml);
+                    setPlaygroundCss(finalCss);
+                    setPlaygroundJs(finalJs);
+                    setPlaygroundRevision((prev) => prev + 1);
 
-                      handleSaveProject(
-                        originalProj.name,
-                        finalHtml,
-                        finalCss,
-                        finalJs,
-                        editingId
-                      );
-                    }
+                    handleSaveProject(
+                      originalProj.name,
+                      finalHtml,
+                      finalCss,
+                      finalJs,
+                      editingId
+                    );
                   }
                 }
+              }
 
-                return updated;
-              });
-            }
-            return '';
-          });
+              return updated;
+            });
+          }
+          if (associatedProjectId) {
+            loadProjects(backendUrl, token || '');
+          }
           setLoading(false);
           setThinkingStatus(null);
         }
@@ -800,9 +813,43 @@ window.onresize = () => {
   };
 
   const handleOpenCodeInPlayground = async (content: string, messageId: string) => {
+    const existingProjectId = messageProjectIds[messageId] || null;
+    
+    if (existingProjectId) {
+      let p = projectsRef.current.find(proj => proj.id === existingProjectId);
+      if (!p && token && backendUrl) {
+        try {
+          const response = await fetch(`${backendUrl}/projects/${existingProjectId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (response.ok) {
+            p = await response.json();
+            setProjects(prev => [p, ...prev.filter(proj => proj.id !== existingProjectId)]);
+          }
+        } catch (e) {
+          console.error("Failed to fetch project directly", e);
+        }
+      }
+      if (p) {
+        setPlaygroundHtml(p.html || '');
+        setPlaygroundCss(p.css || '');
+        setPlaygroundJs(p.js || '');
+        setPlaygroundProjectName(p.name || 'Untitled App');
+        setPlaygroundProjectId(p.id);
+        setPlaygroundView('preview');
+        setPlaygroundRevision((prev) => prev + 1);
+        openPlayground();
+        return;
+      }
+    }
+
     const htmlMatch = content.match(/```html\n([\s\S]*?)```/i);
     const cssMatch = content.match(/```css\n([\s\S]*?)```/i);
     const jsMatch = content.match(/```javascript\n([\s\S]*?)```/i) || content.match(/```js\n([\s\S]*?)```/i);
+
+    if (!htmlMatch && !cssMatch && !jsMatch) {
+      return;
+    }
 
     const htmlCode = htmlMatch ? htmlMatch[1] : '<h1>Live Preview</h1>';
     const cssCode = cssMatch ? cssMatch[1] : '';
@@ -813,24 +860,20 @@ window.onresize = () => {
     setPlaygroundJs(jsCode);
     setPlaygroundRevision((prev) => prev + 1);
 
-    // Set a default project name from session or fallback
     const session = sessions.find((s) => s.id === currentSessionId);
     const projName = session ? `Playground - ${session.name}` : 'Playground Preview';
     setPlaygroundProjectName(projName);
 
-    // Get existing project ID associated with this message card, if any
-    const existingProjectId = messageProjectIds[messageId] || null;
-
-    // Save project to backend
     const savedId = await handleSaveProject(projName, htmlCode, cssCode, jsCode, existingProjectId);
     if (savedId) {
       setPlaygroundProjectId(savedId);
+      setPlaygroundView('preview');
+      openPlayground();
+      loadProjects(backendUrl, token || '');
       if (!existingProjectId) {
         setMessageProjectIds((prev) => ({ ...prev, [messageId]: savedId }));
       }
     }
-    
-    // Open the drawer
     setPlaygroundView('preview');
     openPlayground();
   };
@@ -918,7 +961,7 @@ window.onresize = () => {
 
     const userQuery = inputText.trim();
     const activeProject = activeEditingProjectId 
-      ? projects.find(p => p.id === activeEditingProjectId) 
+      ? projectsRef.current.find(p => p.id === activeEditingProjectId) 
       : null;
 
     // Generate current local date/time string on client to bypass server timezone issues
@@ -1230,6 +1273,7 @@ window.onresize = () => {
             loading={loading}
             thinkingStatus={thinkingStatus}
             handleOpenCodeInPlayground={handleOpenCodeInPlayground}
+            messageProjectIds={messageProjectIds}
           />
         )}
 
@@ -1333,6 +1377,7 @@ window.onresize = () => {
         playgroundRevision={playgroundRevision}
         token={token}
         backendUrl={backendUrl}
+        currentSessionId={currentSessionId}
       />
 
       {/* Delete Confirmation Modal */}
