@@ -81,7 +81,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                 <View style={styles.laptopLogHeader}>
                   <Ionicons name="terminal-outline" size={13} color="#2563eb" />
                   <Text style={styles.laptopLogTitle}>
-                    {item.content.includes("WebView Rendering Error") ? "Playground Console" : "Laptop execution output"}
+                    {item.content.includes("WebView Rendering Error") ? "Playground Console" : "System Link Output"}
                   </Text>
                 </View>
                 <Text style={styles.laptopLogText}>{item.content}</Text>

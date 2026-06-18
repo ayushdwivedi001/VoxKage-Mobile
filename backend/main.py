@@ -629,6 +629,40 @@ async def upload_document(
         delete_file(file_path)
         raise HTTPException(status_code=500, detail=f"Failed to process and index upload: {str(e)}")
 
+@app.post("/rag/upload")
+async def upload_rag_document(
+    file: UploadFile = File(...),
+    document_id: str | None = Form(None),
+    user: str = Depends(get_current_user)
+):
+    """
+    Receives document uploads (max 50MB), chunks/indexes them into Supabase, and deletes local temp storage.
+    """
+    # Enforce 50MB limit
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    
+    if size > 50 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="File size exceeds the maximum allowed limit of 50MB, Sir."
+        )
+        
+    import uuid
+    doc_id = document_id or str(uuid.uuid4())
+    
+    file_path = save_upload(file)
+    try:
+        # Index document vectors
+        result = index_file_in_rag(file_path, file.filename, user, doc_id)
+        # Clean up local file after indexing
+        delete_file(file_path)
+        return result
+    except Exception as e:
+        delete_file(file_path)
+        raise HTTPException(status_code=500, detail=f"Failed to process and index upload: {str(e)}")
+
 # --- WebSocket Chat Streaming Server ---
 
 async def chat_ws_reader(websocket: WebSocket, receive_queue: asyncio.Queue):
@@ -706,6 +740,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
             active_project = payload_data.get("active_project", None)
             client_time = payload_data.get("client_time", None)
             variant = payload_data.get("variant", "High")
+            document_id = payload_data.get("document_id", None)
+            image_base64 = payload_data.get("image", None)
 
             if not query:
                 continue
@@ -784,7 +820,9 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 active_project_box=active_project_box,
                 client_time=client_time,
                 client_websocket=websocket,
-                variant=variant
+                variant=variant,
+                document_id=document_id,
+                image_base64=image_base64
             )
             
             async for chunk_sse in async_generator:

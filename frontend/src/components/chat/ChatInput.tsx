@@ -25,6 +25,14 @@ interface ChatInputProps {
   setActiveEditingProjectId: (id: string | null) => void;
   handleStopGeneration: () => void;
   contextPercent: number;
+  // Staged Attachment Props
+  stagedAttachment: { uri: string; name: string; type: 'image' | 'document'; size: number } | null;
+  setStagedAttachment: (attachment: any) => void;
+  showMediaPopover: boolean;
+  setShowMediaPopover: (show: boolean) => void;
+  handleCameraPress: () => void;
+  handlePhotosPress: () => void;
+  handleFilesPress: () => void;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -49,6 +57,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   setActiveEditingProjectId,
   handleStopGeneration,
   contextPercent,
+  stagedAttachment,
+  setStagedAttachment,
+  showMediaPopover,
+  setShowMediaPopover,
+  handleCameraPress,
+  handlePhotosPress,
+  handleFilesPress,
 }) => {
   const [showTooltip, setShowTooltip] = React.useState(false);
   React.useEffect(() => {
@@ -60,6 +75,48 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <View style={styles.inputAreaContainer}>
+      {showMediaPopover && (
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.dropdownBackdrop}
+          onPress={() => setShowMediaPopover(false)}
+        />
+      )}
+      {showMediaPopover && (
+        <View style={styles.mediaPopover}>
+          <TouchableOpacity
+            style={styles.mediaPopoverItem}
+            onPress={() => {
+              setShowMediaPopover(false);
+              handleCameraPress();
+            }}
+          >
+            <Ionicons name="camera-outline" size={16} color="#60a5fa" />
+            <Text style={styles.mediaPopoverText}>Camera</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.mediaPopoverItem}
+            onPress={() => {
+              setShowMediaPopover(false);
+              handlePhotosPress();
+            }}
+          >
+            <Ionicons name="image-outline" size={16} color="#60a5fa" />
+            <Text style={styles.mediaPopoverText}>Photos</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.mediaPopoverItem}
+            onPress={() => {
+              setShowMediaPopover(false);
+              handleFilesPress();
+            }}
+          >
+            <Ionicons name="document-text-outline" size={16} color="#60a5fa" />
+            <Text style={styles.mediaPopoverText}>Files</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {showVariantDropdown && (
         <TouchableOpacity
           activeOpacity={1}
@@ -199,9 +256,36 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </View>
       )}
 
+      {/* Staged Attachment Preview Card */}
+      {stagedAttachment && (
+        <View style={styles.stagedCard}>
+          <View style={styles.stagedThumbnail}>
+            {stagedAttachment.type === 'image' ? (
+              <Ionicons name="image-outline" size={20} color="#60a5fa" />
+            ) : (
+              <Ionicons name="document-text-outline" size={20} color="#3b82f6" />
+            )}
+          </View>
+          <View style={styles.stagedInfo}>
+            <Text style={styles.stagedName} numberOfLines={1}>
+              {stagedAttachment.name}
+            </Text>
+            <Text style={styles.stagedSize}>
+              {(stagedAttachment.size / (1024 * 1024)).toFixed(2)} MB
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.stagedCloseBtn}
+            onPress={() => setStagedAttachment(null)}
+          >
+            <Ionicons name="close" size={14} color="#94a3b8" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.inputPill}>
         <TouchableOpacity
-          onPress={handleFileUpload}
+          onPress={() => setShowMediaPopover(!showMediaPopover)}
           style={styles.inputAddBtn}
           disabled={uploadingFile}
         >
@@ -246,13 +330,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <TouchableOpacity
             onPress={handleSendMessage}
             style={styles.inputSendBtn}
-            disabled={!inputText.trim()}
+            disabled={!inputText.trim() && !stagedAttachment}
           >
-            <View style={[styles.sendCircle, inputText.trim() && styles.sendCircleActive]}>
+            <View style={[styles.sendCircle, (inputText.trim() || stagedAttachment) && styles.sendCircleActive]}>
               <Ionicons
                 name="arrow-up"
                 size={16}
-                color={inputText.trim() ? '#ffffff' : '#475569'}
+                color={inputText.trim() || stagedAttachment ? '#ffffff' : '#475569'}
               />
             </View>
           </TouchableOpacity>

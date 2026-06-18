@@ -11,7 +11,7 @@ from datetime import datetime
 
 # Import backend engines
 from websearch_engine import web_search, web_fetch, web_search_deep, web_search_parallel, web_fetch_parallel
-from rag_engine import query_rag_vector
+from rag_engine import query_rag_vector, query_scoped_rag_vector, list_rag_documents, delete_rag_document
 from memory_engine import (
     remember_user, recall_user, get_user_profile, forget_user,
     set_trusted_action, check_trusted, log_problem, log_solution, search_memory
@@ -237,6 +237,31 @@ TOOLS_SCHEMA = [
                     "query": {"type": "string", "description": "Search query describing what to look for."}
                 },
                 "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_indexed_documents",
+            "description": "Retrieve a list of all permanently indexed files/documents in the RAG database, including their names, IDs, and chunk counts.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_indexed_document",
+            "description": "Delete an indexed document from the RAG database by its document ID or filename to free up vector memory or prepare it for update.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "The unique UUID of the document to delete."},
+                    "filename": {"type": "string", "description": "The exact name of the file to delete."}
+                }
             }
         }
     },
@@ -984,7 +1009,9 @@ async def run_agentic_loop(
     active_project_box: list = None,
     client_time: str = None,
     client_websocket = None,
-    variant: str = "High"
+    variant: str = "High",
+    document_id: str = None,
+    image_base64: str = None
 ) -> AsyncGenerator[str, None]:
     if active_project_box is None:
         active_project_box = [None]
@@ -1012,7 +1039,9 @@ async def run_agentic_loop(
             active_project_box=active_project_box,
             client_time=client_time,
             client_websocket=client_websocket,
-            variant=variant
+            variant=variant,
+            document_id=document_id,
+            image_base64=image_base64
         ):
             yield chunk
     finally:
@@ -1048,7 +1077,9 @@ async def _run_agentic_loop_impl(
     active_project_box: list = None,
     client_time: str = None,
     client_websocket = None,
-    variant: str = "High"
+    variant: str = "High",
+    document_id: str = None,
+    image_base64: str = None
 ) -> AsyncGenerator[str, None]:
     """
     Unified agent loop intercepting and executing tool calls locally in the backend,
@@ -1091,6 +1122,11 @@ async def _run_agentic_loop_impl(
         "- CRITICAL: Every website, page, app, or component you generate MUST be fully responsive and optimized specifically for a phone/mobile viewport. Use media queries, flexbox, viewport meta tags, and mobile-friendly touch targets. Do not build desktop-only layouts.\n"
         "- AUTONOMOUS CREATION OF MINI APPS/WEBSITES: If the user asks a query that could benefit from an interactive visualization, dashboard, task planner, itinerary, search summary explorer, or utility tool (such as planning a trip, summarizing search results, comparing options, organizing tasks, or learning a concept), you MUST autonomously create a fully functioning, highly polished, interactive mini web app in the workspace. Do not wait for the user to ask for a website or playground preview. Proactively build it, partition styles/scripts cleanly, check its syntax, and let the user know you have built it for them to preview. Make sure it contains useful buttons, clickable links, tabs, search boxes, and interactive elements, rather than just static text.\n"
         "- CONTEXT COMPACTION: The user can trigger a manual chat history compaction by sending the command '/compact'. This will condense previous messages into a single dense summary brief to reduce context memory size and context window %. If the chat context is high or the user wants to reduce memory usage, you can suggest they run '/compact'.\n\n"
+        "- RAG FILE STORAGE & PERSISTENCE MANAGEMENT:\n"
+        "  - The user has a permanent RAG document store in Supabase pgvector where files they upload are parsed and indexed.\n"
+        "  - You have the 'list_indexed_documents' tool. You can use it to scan the database directly to list all permanently indexed files/documents, their unique IDs, and chunk counts. When asked about what documents are saved, or how many exist, ALWAYS call this tool first, sir.\n"
+        "  - You have the 'delete_indexed_document' tool. You can use it to delete RAG document vectors (by document_id or filename) to free up memory or clean up old files.\n"
+        "  - To update an existing document, first delete it using 'delete_indexed_document', and then instruct the user to upload the new version.\n\n"
         "PRIME DIRECTIVE: CALL TOOLS directly when asked to execute tasks. Do not print raw JSON.\n"
         "Never say you cannot perform an action — if it requires laptop interaction (volume, apps, files, git, terminal), "
         "always call the 'laptop_command' tool. If it requires web searching, call the 'web_search' or 'web_search_deep' tools.\n"
@@ -1136,10 +1172,33 @@ async def _run_agentic_loop_impl(
         )
 
     # Dynamic system context is placed at the end of prompt to keep changes confined
+    document_context_str = ""
+    if document_id:
+        chunks = query_scoped_rag_vector(prompt, user_id, document_id, top_k=5, threshold=-1.0)
+        doc_filename = "attached_document"
+        if chunks:
+            doc_filename = chunks[0].get("filename", "attached_document")
+        document_context_str = (
+            f"\n--- ATTACHED DOCUMENT INFO ---\n"
+            f"Sir, the user has attached a document: '{doc_filename}'.\n"
+            f"You MUST check and reference the scoped RAG chunks below to answer the user's questions about this document.\n"
+        )
+        if chunks:
+            document_context_str += "--- ATTACHED DOCUMENT CONTEXT (Strictly Scoped) ---\n"
+            for idx, chunk in enumerate(chunks):
+                document_context_str += f"[Chunk {idx+1} (Source: {chunk.get('filename')})]: {chunk.get('content')}\n"
+            document_context_str += "--------------------------------------------------\n\n"
+        else:
+            document_context_str += "(No text content could be retrieved from the document vectors, Sir.)\n\n"
+
     system_prompt += (
         f"\n\n--- DYNAMIC SESSION CONTEXT ---\n"
         f"The current local date and time is {current_time_str}. Use this exact timestamp when answering any queries about the date, time, day, or year. Never guess or hallucinate the time.\n"
         f"--- USER SOUL PROFILE MEMORIES ---\n{soul_context}\n\n"
+    )
+    if document_context_str:
+        system_prompt += document_context_str
+    system_prompt += (
         f"--- ACTIVE PLAYGROUND PROJECT WORKSPACE ---\n"
         f"{project_context_str}\n"
     )
@@ -1155,7 +1214,20 @@ async def _run_agentic_loop_impl(
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
-    messages.append({"role": "user", "content": prompt})
+    if image_base64:
+        user_message_content = [
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_base64
+                }
+            }
+        ]
+    else:
+        user_message_content = prompt
+
+    messages.append({"role": "user", "content": user_message_content})
 
     max_iterations = 12
     for iteration in range(max_iterations):
@@ -1268,6 +1340,11 @@ async def _run_agentic_loop_impl(
                     announcement = f"\n*[Browsing and extracting text content for: \"{target}\"...]*\n\n"
                 elif name == "query_rag":
                     announcement = f"\n*[Searching Supabase pgvector RAG memory database for matches...]*\n\n"
+                elif name == "list_indexed_documents":
+                    announcement = f"\n*[Listing all permanently indexed documents in RAG database...]*\n\n"
+                elif name == "delete_indexed_document":
+                    target_name = args.get("filename") or args.get("document_id") or ""
+                    announcement = f"\n*[Deleting document: \"{target_name}\" from Supabase vector RAG database...]*\n\n"
                 elif name == "remember_user":
                     announcement = f"\n*[Updating your profile memories with new facts...]*\n\n"
                 elif name == "recall_user":
@@ -1424,8 +1501,21 @@ async def _run_agentic_loop_impl(
                     elif name == "query_rag":
                         q = args.get("query", "")
                         yield json.dumps({"type": "hud_log", "content": f"Retrieving RAG document matches..."})
-                        docs = query_rag_vector(q, user_id)
+                        if document_id:
+                            docs = query_scoped_rag_vector(q, user_id, document_id, threshold=-1.0)
+                        else:
+                            docs = query_rag_vector(q, user_id, threshold=0.15)
                         tool_output = json.dumps(docs)
+                    elif name == "list_indexed_documents":
+                        yield json.dumps({"type": "hud_log", "content": f"Listing all permanently indexed documents..."})
+                        docs = list_rag_documents(user_id)
+                        tool_output = json.dumps(docs)
+                    elif name == "delete_indexed_document":
+                        doc_id_to_del = args.get("document_id")
+                        filename_to_del = args.get("filename")
+                        yield json.dumps({"type": "hud_log", "content": f"Deleting matching RAG chunks..."})
+                        res = delete_rag_document(user_id, document_id=doc_id_to_del, filename=filename_to_del)
+                        tool_output = json.dumps(res)
                     elif name == "remember_user":
                         c = args.get("category", "notes")
                         k = args.get("key", "")

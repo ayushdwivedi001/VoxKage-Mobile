@@ -17,6 +17,7 @@ LogBox.ignoreLogs(['Cannot record touch end without a touch start']);
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { WebView } from 'react-native-webview';
 import { storage } from '@/utils/storage';
 
@@ -76,6 +77,10 @@ export default function ChatScreen() {
   // UI Toggles & Controls
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  
+  // Staged Attachment & Media States
+  const [stagedAttachment, setStagedAttachment] = useState<{ uri: string; name: string; type: 'image' | 'document'; size: number; base64?: string } | null>(null);
+  const [showMediaPopover, setShowMediaPopover] = useState(false);
 
   // Playground Code Sandbox State
   const [playgroundHtml, setPlaygroundHtml] = useState('<h1>No live preview compiled yet, Sir.</h1><p>Ask VoxKage to build an app/web page to see it live here.</p>');
@@ -665,7 +670,30 @@ window.onresize = () => {
           {
             id: '2',
             role: 'assistant',
-            content: `Certainly, Sir. I have constructed a responsive live preview dashboard for you. You can slide open the Code Playground drawer on the right to view it live.\n\n\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n<style>\nbody { font-family: sans-serif; background: #090d16; color: #fff; padding: 20px; }\n.card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; text-align: center; }\nh1 { color: #3b82f6; }\nbutton { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }\n</style>\n</head>\n<body>\n<div class='card'>\n<h1>VoxKage Mobile Live Sandbox</h1>\n<p>This is a live compiled application built by VoxKage, Sir.</p>\n<button onclick='alert("Hello Sir!")'>Trigger Interaction</button>\n</div>\n</body>\n</html>\n\`\`\`\n`,
+            content: [
+              "Certainly, Sir. I have constructed a responsive live preview dashboard for you. You can slide open the Code Playground drawer on the right to view it live.",
+              "",
+              "```html",
+              "<!DOCTYPE html>",
+              "<html>",
+              "<head>",
+              "<style>",
+              "body { font-family: sans-serif; background: #090d16; color: #fff; padding: 20px; }",
+              ".card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; text-align: center; }",
+              "h1 { color: #3b82f6; }",
+              "button { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }",
+              "</style>",
+              "</head>",
+              "<body>",
+              "<div class='card'>",
+              "<h1>VoxKage Mobile Live Sandbox</h1>",
+              "<p>This is a live compiled application built by VoxKage, Sir.</p>",
+              '<button onclick=\'alert("Hello Sir!")\'>Trigger Interaction</button>',
+              "</div>",
+              "</body>",
+              "</html>",
+              "```"
+            ].join("\n"),
           },
         ];
         setMessages(mockMsgs);
@@ -673,7 +701,17 @@ window.onresize = () => {
       } else {
         const mockMsgs: ChatMessage[] = [
           { id: '1', role: 'user', content: 'Run git status on my laptop' },
-          { id: '2', role: 'laptop', content: `[task-419] Executing command: git status\nOn branch main\nYour branch is up to date with 'origin/main'.\n\nnothing to commit, working tree clean` },
+          {
+            id: '2',
+            role: 'laptop',
+            content: [
+              "[task-419] Executing command: git status",
+              "On branch main",
+              "Your branch is up to date with 'origin/main'.",
+              "",
+              "nothing to commit, working tree clean"
+            ].join("\n"),
+          },
           { id: '3', role: 'assistant', content: 'The power shell execution completed, Sir. Your git repository working tree is clean with nothing to commit.' },
         ];
         setMessages(mockMsgs);
@@ -1056,16 +1094,26 @@ window.onresize = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() && !stagedAttachment) return;
+
+    const staged = stagedAttachment;
 
     if (token?.startsWith('mock-')) {
       const userQuery = inputText.trim();
+      let displayMsg = userQuery;
+      if (staged) {
+        displayMsg = userQuery 
+          ? `${userQuery}\n\n📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`
+          : `📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`;
+      }
+      
       setInputText('');
+      setStagedAttachment(null);
       setLoading(true);
       setIsNewChat(false);
       setMessages((prev) => [
         ...prev,
-        { id: generateRandomId('user'), role: 'user', content: userQuery },
+        { id: generateRandomId('user'), role: 'user', content: displayMsg },
       ]);
       setStreamingText('');
 
@@ -1074,12 +1122,47 @@ window.onresize = () => {
         let isCmdQuery = /run|git|sys/i.test(userQuery);
         
         let responseTemplate = `Certainly, Sir. I am online in Simulation Mode. Let me know what you need.`;
-        if (isCodeQuery) {
-          responseTemplate = `Certainly, Sir. I have constructed an interactive live preview app dashboard for you. You can slide open the Code Playground drawer on the right to view it live.\n\n\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n<style>\nbody { font-family: sans-serif; background: #090d16; color: #fff; padding: 20px; }\n.card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; text-align: center; }\nh1 { color: #3b82f6; }\nbutton { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }\n</style>\n</head>\n<body>\n<div class='card'>\n<h1>VoxKage Mobile Live Sandbox</h1>\n<p>This is a live compiled application built by VoxKage, Sir.</p>\n<button onclick='alert("Hello Sir!")'>Trigger Interaction</button>\n</div>\n</body>\n</html>\n\`\`\`\n`;
+        if (staged) {
+          responseTemplate = `Certainly, Sir. I see the attached ${staged.type} '${staged.name}'. I have indexed its content in Supabase. How can I help you with it?`;
+        } else if (isCodeQuery) {
+          responseTemplate = [
+            "Certainly, Sir. I have constructed an interactive live preview app dashboard for you. You can slide open the Code Playground drawer on the right to view it live.",
+            "",
+            "```html",
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            "<style>",
+            "body { font-family: sans-serif; background: #090d16; color: #fff; padding: 20px; }",
+            ".card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; text-align: center; }",
+            "h1 { color: #3b82f6; }",
+            "button { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }",
+            "</style>",
+            "</head>",
+            "<body>",
+            "<div class='card'>",
+            "<h1>VoxKage Mobile Live Sandbox</h1>",
+            "<p>This is a live compiled application built by VoxKage, Sir.</p>",
+            '<button onclick=\'alert("Hello Sir!")\'>Trigger Interaction</button>',
+            "</div>",
+            "</body>",
+            "</html>",
+            "```"
+          ].join("\n");
         } else if (isCmdQuery) {
           setMessages((prev) => [
             ...prev,
-            { id: `log-${Math.random()}`, role: 'laptop' as const, content: `[task-419] Executing command: ${userQuery}\nOn branch main\nYour branch is up to date with 'origin/main'.\n\nnothing to commit, working tree clean` }
+            {
+              id: `log-${Math.random()}`,
+              role: 'laptop' as const,
+              content: [
+                `[task-419] Executing command: ${userQuery}`,
+                "On branch main",
+                "Your branch is up to date with 'origin/main'.",
+                "",
+                "nothing to commit, working tree clean"
+              ].join("\n")
+            }
           ]);
           responseTemplate = `The power shell command execution completed, Sir. Working tree is clean.`;
         }
@@ -1137,7 +1220,74 @@ window.onresize = () => {
     }
 
     const userQuery = inputText.trim();
+    let uploadedDocId: string | null = null;
 
+    if (staged && staged.type === 'document') {
+      setUploadingFile(true);
+      setThinkingStatus('Uploading and indexing document, Sir...');
+      
+      const formData = new FormData();
+      if (Platform.OS === 'web') {
+        try {
+          const blobRes = await fetch(staged.uri);
+          const blob = await blobRes.blob();
+          formData.append('file', blob, staged.name);
+        } catch (err: any) {
+          showAlert('File Error', `Failed to read file on web, Sir: ${err.message}`);
+          setUploadingFile(false);
+          return;
+        }
+      } else {
+        formData.append('file', {
+          uri: staged.uri,
+          name: staged.name,
+          type: 'application/octet-stream',
+        } as any);
+      }
+
+      try {
+        const response = await fetch(`${backendUrl}/rag/upload`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+          body: formData,
+        });
+
+        if (response.ok) {
+          const uploadRes = await response.json();
+          uploadedDocId = uploadRes.document_id;
+          
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: generateRandomId('system'),
+              role: 'laptop',
+              content: `📄 Document indexed: ${staged.name}\nVector RAG version has been stored.`,
+            },
+          ]);
+        } else {
+          const errData = await response.json();
+          showAlert('Upload Failed', errData.detail || 'Failed to process document, Sir.');
+          setUploadingFile(false);
+          return;
+        }
+      } catch (err: any) {
+        showAlert('Upload Error', `Failed to upload document: ${err.message}`);
+        setUploadingFile(false);
+        return;
+      } finally {
+        setUploadingFile(false);
+      }
+    }
+
+    let displayMsg = userQuery;
+    if (staged) {
+      displayMsg = userQuery 
+        ? `${userQuery}\n\n📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`
+        : `📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`;
+    }
 
     const activeProject = activeEditingProjectId 
       ? projectsRef.current.find(p => p.id === activeEditingProjectId) 
@@ -1157,29 +1307,34 @@ window.onresize = () => {
 
     setMessages((prev) => [
       ...prev,
-      { id: generateRandomId('user'), role: 'user', content: userQuery },
+      { id: generateRandomId('user'), role: 'user', content: displayMsg },
     ]);
     setInputText('');
+    setStagedAttachment(null);
     setLoading(true);
     setStreamingText('');
     setThinkingStatus('Connecting to VoxKage core, Sir...');
 
+    const constructPayload = () => {
+      return JSON.stringify({
+        message: userQuery,
+        model: activeModel,
+        variant: VARIANTS[activeVariantIndex],
+        client_time: clientTimeStr,
+        active_project: activeProject ? {
+          id: activeProject.id,
+          name: activeProject.name,
+          html: activeProject.html,
+          css: activeProject.css,
+          js: activeProject.js
+        } : null,
+        document_id: uploadedDocId || undefined,
+        image: staged && staged.type === 'image' ? staged.base64 : undefined,
+      });
+    };
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          message: userQuery,
-          model: activeModel,
-          variant: VARIANTS[activeVariantIndex],
-          client_time: clientTimeStr,
-          active_project: activeProject ? {
-            id: activeProject.id,
-            name: activeProject.name,
-            html: activeProject.html,
-            css: activeProject.css,
-            js: activeProject.js
-          } : null,
-        })
-      );
+      wsRef.current.send(constructPayload());
     } else {
       // Connect only if there is no socket or if it's closed/closing
       if (!wsRef.current || (wsRef.current.readyState !== WebSocket.OPEN && wsRef.current.readyState !== WebSocket.CONNECTING)) {
@@ -1193,21 +1348,7 @@ window.onresize = () => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           clearInterval(interval);
           setThinkingStatus('VoxKage is processing, Sir...');
-          wsRef.current.send(
-            JSON.stringify({
-              message: userQuery,
-              model: activeModel,
-              variant: VARIANTS[activeVariantIndex],
-              client_time: clientTimeStr,
-              active_project: activeProject ? {
-                id: activeProject.id,
-                name: activeProject.name,
-                html: activeProject.html,
-                css: activeProject.css,
-                js: activeProject.js
-              } : null,
-            })
-          );
+          wsRef.current.send(constructPayload());
         } else {
           checks++;
           if (checks % 15 === 0) {
@@ -1224,11 +1365,111 @@ window.onresize = () => {
     }
   };
 
+  const handleCameraPress = async () => {
+    try {
+      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permissionResult.granted) {
+        showAlert('Permission Denied', 'Camera permission is required to take photos, Sir.');
+        return;
+      }
+      
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const fileSize = asset.fileSize || 0;
+        if (fileSize > 50 * 1024 * 1024) {
+          showAlert('File Too Large', 'Selected image exceeds the 50MB size limit, Sir.');
+          return;
+        }
+        
+        setStagedAttachment({
+          uri: asset.uri,
+          name: asset.fileName || 'camera_photo.jpg',
+          type: 'image',
+          size: fileSize,
+          base64: asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : undefined,
+        });
+      }
+    } catch (e: any) {
+      showAlert('Error', `Failed to open camera: ${e.message}`);
+    }
+  };
+
+  const handlePhotosPress = async () => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        showAlert('Permission Denied', 'Photos permission is required to pick images, Sir.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const fileSize = asset.fileSize || 0;
+        if (fileSize > 50 * 1024 * 1024) {
+          showAlert('File Too Large', 'Selected image exceeds the 50MB size limit, Sir.');
+          return;
+        }
+
+        setStagedAttachment({
+          uri: asset.uri,
+          name: asset.fileName || 'gallery_photo.jpg',
+          type: 'image',
+          size: fileSize,
+          base64: asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : undefined,
+        });
+      }
+    } catch (e: any) {
+      showAlert('Error', `Failed to open photo library: ${e.message}`);
+    }
+  };
+
+  const handleFilesPress = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const fileSize = asset.size || 0;
+        
+        if (fileSize > 50 * 1024 * 1024) {
+          showAlert('File Too Large', 'Selected document exceeds the 50MB size limit, Sir.');
+          return;
+        }
+
+        setStagedAttachment({
+          uri: asset.uri,
+          name: asset.name,
+          type: 'document',
+          size: fileSize,
+        });
+      }
+    } catch (e: any) {
+      showAlert('Error', `Failed to select document: ${e.message}`);
+    }
+  };
+
   const handleFileUpload = async () => {
     if (token?.startsWith('mock-')) {
       setMessages((prev) => [
         ...prev,
-        { id: generateRandomId('mock-file'), role: 'laptop', content: '📄 Document indexed: AyushResume.pdf\nVector RAG store updated in Supabase.' }
+        { id: generateRandomId('mock-file'), role: 'laptop', content: '📄 Document indexed: AyushResume.pdf\nVector RAG version has been stored.' }
       ]);
       showAlert('Mock Indexed', 'Simulator Mode: Document successfully indexed.');
       return;
@@ -1250,11 +1491,23 @@ window.onresize = () => {
       setUploadingFile(true);
 
       const formData = new FormData();
-      formData.append('file', {
-        uri: fileAsset.uri,
-        name: fileAsset.name,
-        type: fileAsset.mimeType || 'application/octet-stream',
+      if (Platform.OS === 'web') {
+        try {
+          const blobRes = await fetch(fileAsset.uri);
+          const blob = await blobRes.blob();
+          formData.append('file', blob, fileAsset.name);
+        } catch (err: any) {
+          showAlert('File Error', `Failed to read file on web, Sir: ${err.message}`);
+          setUploadingFile(false);
+          return;
+        }
+      } else {
+        formData.append('file', {
+          uri: fileAsset.uri,
+          name: fileAsset.name,
+          type: fileAsset.mimeType || 'application/octet-stream',
       } as any);
+      }
 
       const response = await fetch(`${backendUrl}/upload`, {
         method: 'POST',
@@ -1276,7 +1529,7 @@ window.onresize = () => {
           {
             id: `system-${Math.random()}`,
             role: 'laptop',
-            content: `📄 Document indexed: ${fileAsset.name}\nVector RAG store updated in Supabase.`,
+            content: `📄 Document indexed: ${fileAsset.name}\nVector RAG version has been stored.`,
           },
         ]);
       } else {
@@ -1481,6 +1734,13 @@ window.onresize = () => {
           setActiveEditingProjectId={setActiveEditingProjectId}
           handleStopGeneration={handleStopGeneration}
           contextPercent={contextPercent}
+          stagedAttachment={stagedAttachment}
+          setStagedAttachment={setStagedAttachment}
+          showMediaPopover={showMediaPopover}
+          setShowMediaPopover={setShowMediaPopover}
+          handleCameraPress={handleCameraPress}
+          handlePhotosPress={handlePhotosPress}
+          handleFilesPress={handleFilesPress}
         />
       </KeyboardAvoidingView>
 
