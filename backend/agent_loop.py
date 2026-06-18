@@ -70,6 +70,64 @@ def search_frontend_snippets(user_id: str, query: str) -> str:
         out += f"Code:\n{r['code']}\n\n"
     return out
 
+def get_safe_workspace_path(base_dir: str, file_path: str) -> str:
+    clean_relative = file_path.lstrip("/\\")
+    resolved_path = os.path.abspath(os.path.join(base_dir, clean_relative))
+    if not resolved_path.startswith(os.path.abspath(base_dir)):
+        raise PermissionError("Path traversal attempt detected, Sir.")
+    return resolved_path
+
+def sync_workspace_to_local(project_id: str, files_dict: dict):
+    base_dir = os.path.join("projects", str(project_id))
+    os.makedirs(base_dir, exist_ok=True)
+    # Clear directory first to avoid stale files from previous runs
+    for root, dirs, files in os.walk(base_dir, topdown=False):
+        for name in files:
+            try:
+                os.remove(os.path.join(root, name))
+            except:
+                pass
+        for name in dirs:
+            try:
+                os.rmdir(os.path.join(root, name))
+            except:
+                pass
+    
+    for rel_path, content in files_dict.items():
+        try:
+            safe_path = get_safe_workspace_path(base_dir, rel_path)
+            os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+            with open(safe_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as e:
+            print(f"Error syncing {rel_path} to local: {e}")
+
+def get_workspace_files_dict(project_id: str) -> dict:
+    base_dir = os.path.join("projects", str(project_id))
+    files_dict = {}
+    if not os.path.exists(base_dir):
+        return files_dict
+    
+    for root, _, files in os.walk(base_dir):
+        for name in files:
+            full_path = os.path.join(root, name)
+            rel_path = os.path.relpath(full_path, base_dir).replace("\\", "/")
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    files_dict[rel_path] = f.read()
+            except Exception as e:
+                print(f"Error reading {rel_path} from local: {e}")
+    return files_dict
+
+def cleanup_local_workspace(project_id: str):
+    base_dir = os.path.join("projects", str(project_id))
+    if os.path.exists(base_dir):
+        import shutil
+        try:
+            shutil.rmtree(base_dir)
+        except Exception as e:
+            print(f"Error cleaning up workspace {project_id}: {e}")
+
 # --- Define Tool Schemas ---
 TOOLS_SCHEMA = [
     # --- Web Search & Research ---
@@ -672,6 +730,91 @@ TOOLS_SCHEMA = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_list_files",
+            "description": "List all files in the current project workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_read_file",
+            "description": "Read the contents of a file in the project workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Relative path of the file to read (e.g. 'index.html', 'style.css', 'script.js')."}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_write_file",
+            "description": "Write/create a file in the project workspace with specified content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Relative path of the file to write (e.g. 'index.html', 'style.css', 'script.js')."},
+                    "content": {"type": "string", "description": "Full text content to write to the file."}
+                },
+                "required": ["file_path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_edit_file",
+            "description": "Edit an existing file in the project workspace using search-and-replace block replacement.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Relative path of the file to edit."},
+                    "search_content": {"type": "string", "description": "The exact string content to look for in the file (must match exactly)."},
+                    "replace_content": {"type": "string", "description": "The replacement content for search_content."}
+                },
+                "required": ["file_path", "search_content", "replace_content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_delete_file",
+            "description": "Delete a file from the project workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Relative path of the file to delete."}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_syntax_check",
+            "description": "Perform syntactic linting and checks on HTML, CSS, or JS files in the project workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Relative path of the file to check."}
+                },
+                "required": ["file_path"]
+            }
+        }
     }
 ]
 
@@ -688,10 +831,64 @@ async def run_agentic_loop(
     active_project: dict = None,
     client_time: str = None
 ) -> AsyncGenerator[str, None]:
+    active_project_id = active_project.get("id") if active_project else None
+    if active_project_id:
+        files_dict = active_project.get("files") or {}
+        if not files_dict:
+            files_dict = {
+                "index.html": active_project.get("html") or "",
+                "style.css": active_project.get("css") or "",
+                "script.js": active_project.get("js") or ""
+            }
+        sync_workspace_to_local(active_project_id, files_dict)
+
+    try:
+        async for chunk in _run_agentic_loop_impl(
+            prompt=prompt,
+            user_id=user_id,
+            session_id=session_id,
+            model_key=model_key,
+            history=history,
+            manager_ref=manager_ref,
+            active_project=active_project,
+            client_time=client_time
+        ):
+            yield chunk
+    finally:
+        if active_project_id:
+            try:
+                final_files = get_workspace_files_dict(active_project_id)
+                if final_files:
+                    from database import save_playground_project
+                    save_playground_project(
+                        user_id=user_id,
+                        project_id=active_project_id,
+                        name=active_project.get("name", "Workspace Project"),
+                        html=final_files.get("index.html", ""),
+                        css=final_files.get("style.css", ""),
+                        js=final_files.get("script.js", ""),
+                        files=final_files
+                    )
+            except Exception as e:
+                print(f"Error saving workspace back to DB: {e}")
+            finally:
+                cleanup_local_workspace(active_project_id)
+
+async def _run_agentic_loop_impl(
+    prompt: str,
+    user_id: str,
+    session_id: str,
+    model_key: str = "deepseek-flash",
+    history: list = None,
+    manager_ref = None,
+    active_project: dict = None,
+    client_time: str = None
+) -> AsyncGenerator[str, None]:
     """
     Unified agent loop intercepting and executing tool calls locally in the backend,
     streaming output tokens to the mobile UI in real-time.
     """
+    active_project_id = active_project.get("id") if active_project else None
     api_key = os.getenv("OPENCODE_API_KEY")
     if not api_key:
         yield json.dumps({"type": "error", "content": "OPENCODE_API_KEY not configured on backend."})
@@ -737,16 +934,32 @@ async def run_agentic_loop(
     )
 
     if active_project:
+        files_list_str = ""
+        files_dict = active_project.get("files") or {}
+        if not files_dict:
+            files_dict = {
+                "index.html": active_project.get("html") or "",
+                "style.css": active_project.get("css") or "",
+                "script.js": active_project.get("js") or ""
+            }
+        for path in sorted(files_dict.keys()):
+            files_list_str += f"- {path} ({len(files_dict[path])} chars)\n"
+
         system_prompt += (
             f"\n\n--- ACTIVE PLAYGROUND PROJECT IN CONTEXT ---\n"
-            f"You are currently refining/editing the following project from the Code Playground:\n"
+            f"You are currently working in a multi-file Agentic Workspace for the following Code Playground project:\n"
             f"Project ID: {active_project.get('id')}\n"
             f"Project Name: {active_project.get('name')}\n"
-            f"Current HTML:\n```html\n{active_project.get('html', '')}\n```\n"
-            f"Current CSS:\n```css\n{active_project.get('css', '')}\n```\n"
-            f"Current JS:\n```javascript\n{active_project.get('js', '')}\n```\n"
-            f"When the user asks you to modify, refine, or update this project, you must base your changes on the code above and output the updated code blocks. "
-            f"Ensure your updated code blocks are complete, correct, and fully responsive for the phone/mobile view."
+            f"Workspace Files:\n{files_list_str}\n"
+            "COGNITIVE WORKFLOW FOR WORKSPACE REFINEMENT:\n"
+            "1. Plan: Analyze the workspace structure and determine which files need changes.\n"
+            "2. Read/Inspect: Use `workspace_read_file` to read files you need to understand or modify.\n"
+            "3. Action (Write/Edit): Use `workspace_write_file` or `workspace_edit_file` to create or modify files. Use `workspace_delete_file` if needed.\n"
+            "4. Syntax Check: Run `workspace_syntax_check` on modified files to verify no syntax errors exist.\n"
+            "5. Review & Correct: Review results and iterate if there are syntax errors.\n"
+            "IMPORTANT: When modifying, refining, or adding features, ALWAYS use these workspace tools to edit the files directly. "
+            "DO NOT write/output the entire code blocks in the chat bubble. The user wants the files updated in their workspace, "
+            "not a dump of source code in the chat. Tell the user what files you edited and what was accomplished."
         )
 
     messages = [
@@ -941,6 +1154,18 @@ async def run_agentic_loop(
                     announcement = f"\n*[Retrieving logs for GitHub Job ID: {args.get('job_id', '')}...]*\n\n"
                 elif name == "get_current_datetime":
                     announcement = f"\n*[Checking system clock for current date and time...]*\n\n"
+                elif name == "workspace_list_files":
+                    announcement = f"\n*[Listing active workspace files...]*\n\n"
+                elif name == "workspace_read_file":
+                    announcement = f"\n*[Reading workspace file: {args.get('file_path', '')}...]*\n\n"
+                elif name == "workspace_write_file":
+                    announcement = f"\n*[Writing workspace file: {args.get('file_path', '')}...]*\n\n"
+                elif name == "workspace_edit_file":
+                    announcement = f"\n*[Editing workspace file: {args.get('file_path', '')}...]*\n\n"
+                elif name == "workspace_delete_file":
+                    announcement = f"\n*[Deleting workspace file: {args.get('file_path', '')}...]*\n\n"
+                elif name == "workspace_syntax_check":
+                    announcement = f"\n*[Checking syntax for: {args.get('file_path', '')}...]*\n\n"
                 else:
                     announcement = f"\n*[Executing tool: {name}...]*\n\n"
 
@@ -1172,6 +1397,206 @@ async def run_agentic_loop(
                                 "timezone": "Server UTC Time",
                                 "timestamp": datetime.now().isoformat()
                             })
+                    elif name == "workspace_list_files":
+                        if not active_project_id:
+                            tool_output = "Error: No active playground project in context."
+                        else:
+                            yield json.dumps({"type": "hud_log", "content": "Listing workspace files..."})
+                            base_dir = os.path.join("projects", str(active_project_id))
+                            files_list = []
+                            if os.path.exists(base_dir):
+                                for root, _, files in os.walk(base_dir):
+                                    for f in files:
+                                        full_path = os.path.join(root, f)
+                                        rel_path = os.path.relpath(full_path, base_dir).replace("\\", "/")
+                                        files_list.append(rel_path)
+                            tool_output = json.dumps({"files": sorted(files_list)})
+
+                    elif name == "workspace_read_file":
+                        file_path = args.get("file_path", "")
+                        if not active_project_id:
+                            tool_output = "Error: No active playground project in context."
+                        elif not file_path:
+                            tool_output = "Error: file_path argument is required."
+                        else:
+                            yield json.dumps({"type": "hud_log", "content": f"Reading workspace file: {file_path}"})
+                            base_dir = os.path.join("projects", str(active_project_id))
+                            try:
+                                safe_path = get_safe_workspace_path(base_dir, file_path)
+                                if os.path.exists(safe_path):
+                                    with open(safe_path, "r", encoding="utf-8") as f:
+                                        content = f.read()
+                                    tool_output = content
+                                else:
+                                    tool_output = f"Error: File '{file_path}' does not exist in workspace."
+                            except Exception as e:
+                                tool_output = f"Error: {str(e)}"
+
+                    elif name == "workspace_write_file":
+                        file_path = args.get("file_path", "")
+                        content = args.get("content", "")
+                        if not active_project_id:
+                            tool_output = "Error: No active playground project in context."
+                        elif not file_path:
+                            tool_output = "Error: file_path argument is required."
+                        else:
+                            yield json.dumps({"type": "hud_log", "content": f"Writing workspace file: {file_path}"})
+                            base_dir = os.path.join("projects", str(active_project_id))
+                            try:
+                                safe_path = get_safe_workspace_path(base_dir, file_path)
+                                os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+                                with open(safe_path, "w", encoding="utf-8") as f:
+                                    f.write(content)
+                                tool_output = f"Success: Wrote '{file_path}' ({len(content)} characters)."
+                            except Exception as e:
+                                tool_output = f"Error: {str(e)}"
+
+                    elif name == "workspace_edit_file":
+                        file_path = args.get("file_path", "")
+                        search_content = args.get("search_content", "")
+                        replace_content = args.get("replace_content", "")
+                        if not active_project_id:
+                            tool_output = "Error: No active playground project in context."
+                        elif not file_path:
+                            tool_output = "Error: file_path argument is required."
+                        else:
+                            yield json.dumps({"type": "hud_log", "content": f"Editing workspace file: {file_path}"})
+                            base_dir = os.path.join("projects", str(active_project_id))
+                            try:
+                                safe_path = get_safe_workspace_path(base_dir, file_path)
+                                if os.path.exists(safe_path):
+                                    with open(safe_path, "r", encoding="utf-8") as f:
+                                        existing_content = f.read()
+                                    if search_content not in existing_content:
+                                        tool_output = f"Error: The target search content was not found in '{file_path}'."
+                                    else:
+                                        new_content = existing_content.replace(search_content, replace_content)
+                                        with open(safe_path, "w", encoding="utf-8") as f:
+                                            f.write(new_content)
+                                        tool_output = f"Success: Replaced occurrences in '{file_path}'."
+                                else:
+                                    tool_output = f"Error: File '{file_path}' does not exist in workspace."
+                            except Exception as e:
+                                tool_output = f"Error: {str(e)}"
+
+                    elif name == "workspace_delete_file":
+                        file_path = args.get("file_path", "")
+                        if not active_project_id:
+                            tool_output = "Error: No active playground project in context."
+                        elif not file_path:
+                            tool_output = "Error: file_path argument is required."
+                        else:
+                            yield json.dumps({"type": "hud_log", "content": f"Deleting workspace file: {file_path}"})
+                            base_dir = os.path.join("projects", str(active_project_id))
+                            try:
+                                safe_path = get_safe_workspace_path(base_dir, file_path)
+                                if os.path.exists(safe_path):
+                                    os.remove(safe_path)
+                                    tool_output = f"Success: Deleted '{file_path}'."
+                                else:
+                                    tool_output = f"Error: File '{file_path}' does not exist in workspace."
+                            except Exception as e:
+                                tool_output = f"Error: {str(e)}"
+
+                    elif name == "workspace_syntax_check":
+                        file_path = args.get("file_path", "")
+                        if not active_project_id:
+                            tool_output = "Error: No active playground project in context."
+                        elif not file_path:
+                            tool_output = "Error: file_path argument is required."
+                        else:
+                            yield json.dumps({"type": "hud_log", "content": f"Checking syntax of: {file_path}"})
+                            base_dir = os.path.join("projects", str(active_project_id))
+                            try:
+                                safe_path = get_safe_workspace_path(base_dir, file_path)
+                                if not os.path.exists(safe_path):
+                                    tool_output = f"Error: File '{file_path}' does not exist."
+                                else:
+                                    with open(safe_path, "r", encoding="utf-8") as f:
+                                        content = f.read()
+                                    
+                                    errors = []
+                                    if file_path.endswith(".html"):
+                                        from html.parser import HTMLParser
+                                        class SimpleHTMLValidator(HTMLParser):
+                                            def __init__(self):
+                                                super().__init__()
+                                                self.tags = []
+                                                self.errors = []
+                                            def handle_starttag(self, tag, attrs):
+                                                self_closing = {'img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'embed', 'param', 'col', 'area', 'track'}
+                                                if tag not in self_closing:
+                                                    self.tags.append((tag, self.getpos()))
+                                            def handle_endtag(self, tag):
+                                                self_closing = {'img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'embed', 'param', 'col', 'area', 'track'}
+                                                if tag in self_closing:
+                                                    return
+                                                if not self.tags:
+                                                    self.errors.append(f"Unexpected end tag </{tag}> on line {self.getpos()[0]}, col {self.getpos()[1]}")
+                                                else:
+                                                    start_tag, pos = self.tags.pop()
+                                                    if start_tag != tag:
+                                                        self.errors.append(f"Mismatched tag: expected </{start_tag}> (opened line {pos[0]}), found </{tag}> on line {self.getpos()[0]}")
+                                        
+                                        parser = SimpleHTMLValidator()
+                                        try:
+                                            parser.feed(content)
+                                            if parser.tags:
+                                                for tag, pos in parser.tags:
+                                                    parser.errors.append(f"Unclosed tag <{tag}> opened on line {pos[0]}, col {pos[1]}")
+                                            errors = parser.errors
+                                        except Exception as he:
+                                            errors.append(f"HTML Parser error: {str(he)}")
+                                    
+                                    elif file_path.endswith(".js"):
+                                        stack = []
+                                        mapping = {')': '(', '}': '{', ']': '['}
+                                        lines = content.splitlines()
+                                        for line_idx, line in enumerate(lines, 1):
+                                            clean_line = ""
+                                            in_string = False
+                                            string_char = None
+                                            skip_next = False
+                                            for idx, char in enumerate(line):
+                                                if skip_next:
+                                                    skip_next = False
+                                                    continue
+                                                if char == '\\' and in_string:
+                                                    skip_next = True
+                                                    continue
+                                                if char in ('"', "'", '`'):
+                                                    if not in_string:
+                                                        in_string = True
+                                                        string_char = char
+                                                    elif string_char == char:
+                                                        in_string = False
+                                                elif not in_string:
+                                                    if char == '/' and idx < len(line) - 1 and line[idx+1] == '/':
+                                                        break
+                                                    clean_line += char
+                                            
+                                            for char in clean_line:
+                                                if char in mapping.values():
+                                                    stack.append((char, line_idx))
+                                                elif char in mapping.keys():
+                                                    if not stack:
+                                                        errors.append(f"Mismatched closure: unexpected '{char}' on line {line_idx}")
+                                                        break
+                                                    else:
+                                                        top, start_line = stack.pop()
+                                                        if top != mapping[char]:
+                                                            errors.append(f"Mismatched brackets: '{char}' on line {line_idx} does not match '{top}' from line {start_line}")
+                                                            break
+                                        if stack:
+                                            for char, line_idx in stack:
+                                                errors.append(f"Unclosed opening bracket '{char}' on line {line_idx}")
+
+                                    if errors:
+                                        tool_output = json.dumps({"status": "error", "errors": errors})
+                                    else:
+                                        tool_output = json.dumps({"status": "success", "message": f"Syntax check passed for '{file_path}'."})
+                            except Exception as e:
+                                tool_output = f"Error performing syntax check: {str(e)}"
                     else:
                         tool_output = f"Error: Tool '{name}' is not supported."
                 except Exception as e:

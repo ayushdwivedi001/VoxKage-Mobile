@@ -29,6 +29,8 @@ interface PlaygroundDrawerProps {
   handleDeleteProject: (id: string) => void;
   compiledSandboxHtml: string;
   playgroundRevision: number;
+  token: string | null;
+  backendUrl: string;
 }
 
 export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
@@ -56,7 +58,25 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
   handleDeleteProject,
   compiledSandboxHtml,
   playgroundRevision,
+  token,
+  backendUrl,
 }) => {
+  const [viewMode, setViewMode] = React.useState<'sandbox' | 'explorer' | 'fileviewer'>('sandbox');
+  const [selectedFile, setSelectedFile] = React.useState<string | null>(null);
+  const [selectedFileContent, setSelectedFileContent] = React.useState<string>('');
+
+  // Reset view mode when project changes or drawer opens/closes
+  React.useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        setViewMode('sandbox');
+        setSelectedFile(null);
+        setSelectedFileContent('');
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, playgroundProjectId]);
+
   return (
     <>
       {isOpen && (
@@ -92,18 +112,58 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
           </View>
 
           {playgroundView === 'preview' ? (
-            <TouchableOpacity 
-              style={styles.playgroundRefineBtn}
-              onPress={() => {
-                if (playgroundProjectId) {
-                  setActiveEditingProjectId(playgroundProjectId);
-                  onClose();
-                }
-              }}
-            >
-              <Ionicons name="color-wand-outline" size={16} color="#60a5fa" />
-              <Text style={styles.playgroundRefineText}>Refine</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              {/* Eye Button (Toggle Live Preview / Files Browser) */}
+              <TouchableOpacity
+                style={{ padding: 4 }}
+                onPress={() => {
+                  if (viewMode === 'sandbox') {
+                    setViewMode('explorer');
+                  } else {
+                    setViewMode('sandbox');
+                  }
+                }}
+              >
+                <Ionicons 
+                  name={viewMode === 'sandbox' ? "eye-outline" : "eye-off-outline"} 
+                  size={20} 
+                  color="#60a5fa" 
+                />
+              </TouchableOpacity>
+
+              {/* Download Button */}
+              {playgroundProjectId && !playgroundProjectId.startsWith('mock-') && (
+                <TouchableOpacity
+                  style={{ padding: 4 }}
+                  onPress={() => {
+                    const downloadUrl = `${backendUrl}/projects/${playgroundProjectId}/download?token=${token}`;
+                    if (Platform.OS === 'web') {
+                      window.open(downloadUrl, '_blank');
+                    } else {
+                      import('react-native').then(({ Linking }) => {
+                        Linking.openURL(downloadUrl);
+                      });
+                    }
+                  }}
+                >
+                  <Ionicons name="download-outline" size={20} color="#60a5fa" />
+                </TouchableOpacity>
+              )}
+
+              {/* Refine Button */}
+              <TouchableOpacity 
+                style={styles.playgroundRefineBtn}
+                onPress={() => {
+                  if (playgroundProjectId) {
+                    setActiveEditingProjectId(playgroundProjectId);
+                    onClose();
+                  }
+                }}
+              >
+                <Ionicons name="color-wand-outline" size={16} color="#60a5fa" />
+                <Text style={styles.playgroundRefineText}>Refine</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <View style={{ width: 60 }} />
           )}
@@ -191,36 +251,151 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
             )}
           </View>
         ) : (
-          /* Live Preview sandbox */
-          <View style={styles.sandboxContainer}>
-            {Platform.OS === 'web' ? (
-              // @ts-ignore
-              <iframe
-                key={`sb-${playgroundRevision}`}
-                srcDoc={compiledSandboxHtml}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  border: 'none',
-                  width: '100%',
-                  height: '100%',
-                  backgroundColor: '#0d0d0d'
-                }}
-                title="Code Preview Sandbox"
-              />
+          /* Live Preview sandbox or Explorer or File Viewer */
+          <View style={{ flex: 1, backgroundColor: '#0d0d0d' }}>
+            {viewMode === 'sandbox' ? (
+              <View style={styles.sandboxContainer}>
+                {Platform.OS === 'web' ? (
+                  // @ts-ignore
+                  <iframe
+                    key={`sb-${playgroundRevision}`}
+                    src={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
+                      ? undefined
+                      : `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}`
+                    }
+                    srcDoc={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
+                      ? compiledSandboxHtml
+                      : undefined
+                    }
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      border: 'none',
+                      width: '100%',
+                      height: '100%',
+                      backgroundColor: '#0d0d0d'
+                    }}
+                    title="Code Preview Sandbox"
+                  />
+                ) : (
+                  <WebView
+                    key={`sb-wv-${playgroundRevision}`}
+                    originWhitelist={['*']}
+                    source={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
+                      ? { html: compiledSandboxHtml }
+                      : { uri: `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}` }
+                    }
+                    style={styles.webView}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    backgroundColor="#0d0d0d"
+                  />
+                )}
+              </View>
+            ) : viewMode === 'explorer' ? (
+              <ScrollView 
+                style={{ flex: 1, padding: 16 }}
+                contentContainerStyle={{ paddingBottom: 32 }}
+              >
+                <Text style={{ color: '#94a3b8', fontSize: 13, marginBottom: 16, fontWeight: '600' }}>
+                  Workspace Files, Sir:
+                </Text>
+                {(() => {
+                  const activeProj = projects.find(p => p.id === playgroundProjectId);
+                  const projectFiles = activeProj?.files || {};
+                  
+                  // If files dict is empty, build default files from html/css/js keys
+                  const displayFiles = Object.keys(projectFiles).length > 0 
+                    ? projectFiles 
+                    : {
+                        'index.html': activeProj?.html || '',
+                        'style.css': activeProj?.css || '',
+                        'script.js': activeProj?.js || ''
+                      };
+
+                  return Object.keys(displayFiles).sort().map(filePath => {
+                    const getIconName = (path: string) => {
+                      if (path.endsWith('.html')) return 'logo-html5';
+                      if (path.endsWith('.css')) return 'logo-css3';
+                      if (path.endsWith('.js') || path.endsWith('.json')) return 'logo-javascript';
+                      return 'document-text-outline';
+                    };
+
+                    const getIconColor = (path: string) => {
+                      if (path.endsWith('.html')) return '#f97316'; // orange
+                      if (path.endsWith('.css')) return '#3b82f6'; // blue
+                      if (path.endsWith('.js')) return '#eab308'; // yellow
+                      return '#94a3b8'; // gray
+                    };
+
+                    return (
+                      <TouchableOpacity
+                        key={filePath}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingVertical: 14,
+                          borderBottomWidth: 1,
+                          borderBottomColor: '#1e293b',
+                          gap: 12
+                        }}
+                        onPress={() => {
+                          setSelectedFile(filePath);
+                          setSelectedFileContent(displayFiles[filePath] || '');
+                          setViewMode('fileviewer');
+                        }}
+                      >
+                        {/* @ts-ignore */}
+                        <Ionicons name={getIconName(filePath)} size={20} color={getIconColor(filePath)} />
+                        <Text style={{ color: '#f3f4f6', fontSize: 15, fontWeight: '500' }}>{filePath}</Text>
+                      </TouchableOpacity>
+                    );
+                  });
+                })()}
+              </ScrollView>
             ) : (
-              <WebView
-                key={`sb-wv-${playgroundRevision}`}
-                originWhitelist={['*']}
-                source={{ html: compiledSandboxHtml }}
-                style={styles.webView}
-                javaScriptEnabled={true}
-                domStorageEnabled={true}
-                backgroundColor="#0d0d0d"
-              />
+              /* File Viewer Mode */
+              <View style={{ flex: 1 }}>
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  padding: 14,
+                  backgroundColor: '#111827',
+                  borderBottomWidth: 1,
+                  borderBottomColor: '#1e293b',
+                  gap: 10
+                }}>
+                  <TouchableOpacity
+                    onPress={() => setViewMode('explorer')}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  >
+                    <Ionicons name="arrow-back" size={20} color="#60a5fa" />
+                    <Text style={{ color: '#60a5fa', fontSize: 15, fontWeight: '600' }}>Files</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#94a3b8', fontSize: 14, marginLeft: 10, flex: 1, fontWeight: '500' }} numberOfLines={1}>
+                    {selectedFile}
+                  </Text>
+                </View>
+                <ScrollView 
+                  style={{ flex: 1, backgroundColor: '#090d16', padding: 16 }}
+                  contentContainerStyle={{ paddingBottom: 40 }}
+                >
+                  <TextInput
+                    multiline
+                    editable={false}
+                    value={selectedFileContent}
+                    style={{
+                      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                      color: '#e2e8f0',
+                      fontSize: 12.5,
+                      lineHeight: 20,
+                    }}
+                  />
+                </ScrollView>
+              </View>
             )}
           </View>
         )}

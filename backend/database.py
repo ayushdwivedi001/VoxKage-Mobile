@@ -79,13 +79,26 @@ def get_session_messages(session_id: str) -> list:
     return res.data or []
 
 # --- Projects Management (Playground Drawer) ---
-def save_playground_project(user_id: str, project_id: str | None, name: str, html: str, css: str, js: str) -> dict:
+def save_playground_project(user_id: str, project_id: str | None, name: str, html: str, css: str, js: str, files: dict | None = None) -> dict:
     db = get_db()
+    if not files:
+        files = {
+            "index.html": html or "",
+            "style.css": css or "",
+            "script.js": js or ""
+        }
+    
+    # Sync backward-compatible columns
+    sync_html = files.get("index.html", html or "")
+    sync_css = files.get("style.css", css or "")
+    sync_js = files.get("script.js", js or "")
+
     data = {
         "name": name,
-        "html": html,
-        "css": css,
-        "js": js,
+        "html": sync_html,
+        "css": sync_css,
+        "js": sync_js,
+        "files": files,
         "user_id": user_id,
         "updated_at": "now()"
     }

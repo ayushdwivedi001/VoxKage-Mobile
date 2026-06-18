@@ -1,6 +1,6 @@
 import os
 import json
-from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
@@ -243,6 +243,7 @@ class SaveProjectRequest(BaseModel):
     html: str = ""
     css: str = ""
     js: str = ""
+    files: dict | None = None
     project_id: str | None = None
 
 @app.post("/auth/master-login")
@@ -300,7 +301,7 @@ def save_project(
     req: SaveProjectRequest,
     user: str = Depends(get_current_user)
 ):
-    return save_playground_project(user, req.project_id, req.name, req.html, req.css, req.js)
+    return save_playground_project(user, req.project_id, req.name, req.html, req.css, req.js, req.files)
 
 @app.get("/projects/{project_id}")
 def get_single_project(project_id: str, user: str = Depends(get_current_user)):
@@ -309,6 +310,173 @@ def get_single_project(project_id: str, user: str = Depends(get_current_user)):
 @app.delete("/projects/{project_id}")
 def delete_single_project(project_id: str, user: str = Depends(get_current_user)):
     return delete_playground_project(project_id, user)
+
+@app.get("/projects/{project_id}/preview/{file_path:path}")
+def project_preview(
+    project_id: str,
+    file_path: str = "",
+    token: str | None = None,
+    voxkage_preview_auth: str | None = Cookie(None)
+):
+    from fastapi import Response, Cookie
+    from fastapi.responses import HTMLResponse
+    import mimetypes
+
+    auth_token = token or voxkage_preview_auth
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Unauthorized preview access, Sir.")
+    
+    from jose import jwt, JWTError
+    from auth import SECRET_KEY, ALGORITHM
+    try:
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
+        user: str = payload.get("sub")
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid session token.")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Session expired or invalid.")
+
+    try:
+        project = get_project(project_id, user)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Playground project not found.")
+
+    files = project.get("files") or {}
+    if not files:
+        files = {
+            "index.html": project.get("html", ""),
+            "style.css": project.get("css", ""),
+            "script.js": project.get("js", "")
+        }
+
+    if not file_path or file_path == "":
+        file_path = "index.html"
+
+    normalized_path = os.path.normpath(file_path).replace("\\", "/")
+    if normalized_path.startswith("../") or "/../" in normalized_path or normalized_path.startswith("/"):
+        raise HTTPException(status_code=403, detail="Forbidden: Path traversal blocked, Sir.")
+
+    if normalized_path in files:
+        content = files[normalized_path]
+        mime_type, _ = mimetypes.guess_type(normalized_path)
+        if not mime_type:
+            if normalized_path.endswith(".html"):
+                mime_type = "text/html"
+            elif normalized_path.endswith(".css"):
+                mime_type = "text/css"
+            elif normalized_path.endswith(".js"):
+                mime_type = "application/javascript"
+            else:
+                mime_type = "text/plain"
+
+        response = Response(content=content, media_type=mime_type)
+        if token:
+            response.set_cookie(
+                key="voxkage_preview_auth",
+                value=token,
+                httponly=True,
+                samesite="none",
+                secure=True
+            )
+        return response
+
+    if file_path == "index.html":
+        html_files = [f for f in files.keys() if f.endswith(".html")]
+        if html_files:
+            content = files[html_files[0]]
+            response = Response(content=content, media_type="text/html")
+            if token:
+                response.set_cookie(key="voxkage_preview_auth", value=token, httponly=True, samesite="none", secure=True)
+            return response
+        
+        dir_listing_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Workspace Directory Listing</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {{ background: #050a18; color: #f3f4f6; font-family: sans-serif; padding: 30px; }}
+                h1 {{ color: #60a5fa; font-size: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 12px; }}
+                ul {{ list-style-type: none; padding: 0; }}
+                li {{ padding: 10px 0; border-bottom: 1px solid #1e293b; }}
+                a {{ color: #3b82f6; text-decoration: none; font-size: 15px; }}
+                a:hover {{ text-decoration: underline; color: #60a5fa; }}
+            </style>
+        </head>
+        <body>
+            <h1>Workspace Files Browser — {project.get('name', 'Untitled Project')}</h1>
+            <p style="color: #64748b; font-size: 13px;">No index.html found. Here are the available files, Sir:</p>
+            <ul>
+        """
+        for f in sorted(files.keys()):
+            dir_listing_html += f'<li><a href="{f}">{f}</a></li>'
+        dir_listing_html += """
+            </ul>
+        </body>
+        </html>
+        """
+        response = HTMLResponse(content=dir_listing_html)
+        if token:
+            response.set_cookie(key="voxkage_preview_auth", value=token, httponly=True, samesite="none", secure=True)
+        return response
+
+    raise HTTPException(status_code=404, detail=f"File {file_path} not found in workspace, Sir.")
+
+@app.get("/projects/{project_id}/download")
+def download_project(
+    project_id: str,
+    token: str | None = None,
+    voxkage_preview_auth: str | None = Cookie(None)
+):
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+    from fastapi import Cookie
+
+    auth_token = token or voxkage_preview_auth
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Unauthorized downloader access, Sir.")
+    
+    from jose import jwt, JWTError
+    from auth import SECRET_KEY, ALGORITHM
+    try:
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
+        user: str = payload.get("sub")
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid session token.")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Session expired or invalid.")
+
+    try:
+        project = get_project(project_id, user)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Playground project not found.")
+
+    files = project.get("files") or {}
+    if not files:
+        files = {
+            "index.html": project.get("html", ""),
+            "style.css": project.get("css", ""),
+            "script.js": project.get("js", "")
+        }
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file_path, content in files.items():
+            clean_path = file_path.lstrip("/\\")
+            zip_file.writestr(clean_path, content)
+
+    zip_buffer.seek(0)
+    safe_name = project.get("name", "voxkage_project").replace(" ", "_")
+    safe_name = "".join(c for c in safe_name if c.isalnum() or c in ("_", "-"))
+    filename = f"{safe_name}.zip"
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.get("/models")
 def get_models(user: str = Depends(get_current_user)):
@@ -421,15 +589,27 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
             # --- Auto-generate Session Title ---
             # If session is named "New Chat", generate a smart title using the first message
             if session_info.get("name") == "New Chat":
+                generated_title = None
                 try:
                     title_prompt = f"Summarize this query into a short, creative 3-5 word title for a chat thread (do not include quotes): '{query}'"
                     generated_title = query_opencode_zen(title_prompt, model_key).strip().replace('"', '')
-                    if generated_title:
+                    if not generated_title:
+                        raise ValueError("Empty title returned")
+                except Exception as e:
+                    print(f"⚠️ Failed to auto-generate session title: {e}. Using fallback.")
+                    words = query.strip().split()
+                    if len(words) <= 4:
+                        generated_title = " ".join(words)
+                    else:
+                        generated_title = " ".join(words[:4]) + "..."
+                
+                if generated_title:
+                    try:
                         update_session_name(session_id, user, generated_title)
                         session_info["name"] = generated_title
                         await websocket.send_text(json.dumps({"type": "rename", "name": generated_title}))
-                except Exception as e:
-                    print(f"⚠️ Failed to auto-generate session title: {e}")
+                    except Exception as ex:
+                        print(f"⚠️ Failed to update session name in database: {ex}")
 
     except WebSocketDisconnect:
         manager.disconnect_chat(user, websocket)

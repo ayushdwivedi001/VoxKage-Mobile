@@ -667,11 +667,22 @@ window.onresize = () => {
     if (wsRef.current) wsRef.current.close();
 
     const wsScheme = url.startsWith('https') ? 'wss' : 'ws';
-    const cleanBaseUrl = url.replace(/^(https?:\/\/)/, '');
+    const cleanBaseUrl = url.replace(/^(https?:\/\/)/, '').replace(/\/$/, '');
     const wsUrl = `${wsScheme}://${cleanBaseUrl}/ws/chat/${sessionId}?token=${jwtToken}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+
+    ws.onerror = (err) => {
+      console.error("WebSocket Error, Sir:", err);
+    };
+
+    ws.onclose = (e) => {
+      console.log("WebSocket connection closed, Sir:", e);
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+    };
 
     ws.onmessage = (event) => {
       try {
@@ -929,7 +940,7 @@ window.onresize = () => {
     setInputText('');
     setLoading(true);
     setStreamingText('');
-    setThinkingStatus(null);
+    setThinkingStatus('Connecting to VoxKage core, Sir...');
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
@@ -952,12 +963,13 @@ window.onresize = () => {
         connectWebSocket(targetSessionId || '', token || '', backendUrl);
       }
       
-      // Poll connection status until open or timeout (5s)
+      // Poll connection status until open or timeout (25s to allow HF Space wake up)
       let checks = 0;
-      const maxChecks = 25; // 25 * 200ms = 5000ms
+      const maxChecks = 125; // 125 * 200ms = 25000ms
       const interval = setInterval(() => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           clearInterval(interval);
+          setThinkingStatus('VoxKage is processing, Sir...');
           wsRef.current.send(
             JSON.stringify({
               message: userQuery,
@@ -974,6 +986,9 @@ window.onresize = () => {
           );
         } else {
           checks++;
+          if (checks % 15 === 0) {
+            setThinkingStatus('Waking up cloud engine, Sir... Please stand by.');
+          }
           if (checks >= maxChecks) {
             clearInterval(interval);
             showAlert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
@@ -1205,7 +1220,7 @@ window.onresize = () => {
         </View>
 
         {/* Chat Feed */}
-        {messages.length === 0 && !inputText.trim() ? (
+        {messages.length === 0 && !inputText.trim() && !loading && !streamingText ? (
           <WelcomeGreeting />
         ) : (
           <ChatFeed
@@ -1316,6 +1331,8 @@ window.onresize = () => {
         handleDeleteProject={handleDeleteProject}
         compiledSandboxHtml={compiledSandboxHtml}
         playgroundRevision={playgroundRevision}
+        token={token}
+        backendUrl={backendUrl}
       />
 
       {/* Delete Confirmation Modal */}
