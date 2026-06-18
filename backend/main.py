@@ -598,7 +598,84 @@ async def upload_document(
         delete_file(file_path)
         raise HTTPException(status_code=500, detail=f"Failed to process and index upload: {str(e)}")
 
-# --- WebSocket Chat Streaming Server ---
+# --- Link Preview Metadata Scraper ---
+
+@app.get("/link-preview")
+async def link_preview(url: str, user: str = Depends(get_current_user)):
+    """
+    Scrapes minimal metadata from a URL for rich link preview cards.
+    Returns: title, description, favicon_url, and the original URL.
+    """
+    import httpx
+    import re
+    from urllib.parse import urlparse, urljoin
+
+    try:
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; VoxKage/1.0; +https://voxkage.vercel.app)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        }
+        
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            html = resp.text
+        
+        # Extract Open Graph / meta tags
+        title = ""
+        description = ""
+        favicon_url = ""
+        
+        # OG title > title tag
+        og_title = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']', html, re.I)
+        title_tag = re.search(r'<title[^>]*>(.*?)</title>', html, re.I | re.S)
+        if og_title:
+            title = og_title.group(1).strip()
+        elif title_tag:
+            title = re.sub(r'<[^>]+>', '', title_tag.group(1)).strip()
+        
+        # OG description > meta description
+        og_desc = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\'](.*?)["\']', html, re.I)
+        meta_desc = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', html, re.I)
+        if og_desc:
+            description = og_desc.group(1).strip()
+        elif meta_desc:
+            description = meta_desc.group(1).strip()
+        
+        # Favicon: link rel="icon" or shortcut icon, else /favicon.ico
+        favicon_match = re.search(r'<link[^>]+rel=["\'](?:shortcut )?icon["\'][^>]+href=["\'](.*?)["\']', html, re.I)
+        if favicon_match:
+            fav = favicon_match.group(1).strip()
+            favicon_url = fav if fav.startswith("http") else urljoin(base_url, fav)
+        else:
+            favicon_url = f"{base_url}/favicon.ico"
+        
+        # Truncate description to 160 chars
+        if len(description) > 160:
+            description = description[:157] + "..."
+        
+        return {
+            "url": url,
+            "title": title or parsed.netloc,
+            "description": description,
+            "favicon_url": favicon_url,
+            "domain": parsed.netloc,
+        }
+    except Exception as e:
+        # Return minimal fallback without failing
+        parsed = urlparse(url)
+        return {
+            "url": url,
+            "title": parsed.netloc,
+            "description": "",
+            "favicon_url": f"https://{parsed.netloc}/favicon.ico",
+            "domain": parsed.netloc,
+        }
+
+
 
 @app.websocket("/ws/chat/{session_id}")
 async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: str = Query(...)):

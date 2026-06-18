@@ -1,19 +1,211 @@
-import React from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert } from 'react-native';
+import React, { useState } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  ScrollView,
+  TouchableOpacity,
+  Clipboard,
+  ToastAndroid,
+  Platform,
+  Alert,
+  Pressable,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface MarkdownRendererProps {
   text: string;
 }
 
+// ─── Interactive Table Component ────────────────────────────────────────────
+
+interface TableData {
+  headers: string[];
+  rows: string[][];
+}
+
+function parseMarkdownTable(raw: string): TableData | null {
+  const lines = raw.trim().split('\n').filter(Boolean);
+  if (lines.length < 2) return null;
+
+  const isSeparator = (line: string) => /^\|?[\s\-:]+(\|[\s\-:]+)+\|?$/.test(line.trim());
+
+  const sepIdx = lines.findIndex(isSeparator);
+  if (sepIdx < 1) return null;
+
+  const parseRow = (line: string): string[] =>
+    line
+      .replace(/^\||\|$/g, '')
+      .split('|')
+      .map((c) => c.trim());
+
+  const headers = parseRow(lines[sepIdx - 1]);
+  const rows = lines.slice(sepIdx + 1).map(parseRow);
+
+  return { headers, rows };
+}
+
+function InteractiveTable({ data }: { data: TableData }) {
+  const [copiedCell, setCopiedCell] = useState<string | null>(null);
+  const [sortCol, setSortCol] = useState<number | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const handleCellLongPress = (val: string) => {
+    Clipboard.setString(val);
+    setCopiedCell(val);
+    if (Platform.OS === 'android') {
+      ToastAndroid.show('Copied', ToastAndroid.SHORT);
+    }
+    setTimeout(() => setCopiedCell(null), 1500);
+  };
+
+  const handleSort = (colIdx: number) => {
+    if (sortCol === colIdx) {
+      setSortAsc((a) => !a);
+    } else {
+      setSortCol(colIdx);
+      setSortAsc(true);
+    }
+  };
+
+  const sortedRows = React.useMemo(() => {
+    if (sortCol === null) return data.rows;
+    return [...data.rows].sort((a, b) => {
+      const aVal = a[sortCol] ?? '';
+      const bVal = b[sortCol] ?? '';
+      const aNum = parseFloat(aVal);
+      const bNum = parseFloat(bVal);
+      const cmp = (!isNaN(aNum) && !isNaN(bNum))
+        ? aNum - bNum
+        : aVal.localeCompare(bVal);
+      return sortAsc ? cmp : -cmp;
+    });
+  }, [data.rows, sortCol, sortAsc]);
+
+  return (
+    <View style={tableStyles.wrapper}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+        <View>
+          {/* Header row */}
+          <View style={tableStyles.headerRow}>
+            {data.headers.map((h, i) => (
+              <TouchableOpacity
+                key={`th-${i}`}
+                style={tableStyles.headerCell}
+                onPress={() => handleSort(i)}
+                activeOpacity={0.75}
+              >
+                <Text style={tableStyles.headerText}>{h}</Text>
+                {sortCol === i && (
+                  <Ionicons
+                    name={sortAsc ? 'chevron-up' : 'chevron-down'}
+                    size={11}
+                    color="#60a5fa"
+                    style={{ marginLeft: 4 }}
+                  />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Data rows */}
+          {sortedRows.map((row, rowIdx) => (
+            <View
+              key={`tr-${rowIdx}`}
+              style={[
+                tableStyles.dataRow,
+                rowIdx % 2 === 0 ? tableStyles.rowEven : tableStyles.rowOdd,
+              ]}
+            >
+              {data.headers.map((_, colIdx) => {
+                const val = row[colIdx] ?? '';
+                const isHighlighted = copiedCell === val && val !== '';
+                return (
+                  <Pressable
+                    key={`td-${rowIdx}-${colIdx}`}
+                    style={[tableStyles.dataCell, isHighlighted && tableStyles.cellHighlighted]}
+                    onLongPress={() => handleCellLongPress(val)}
+                  >
+                    <Text style={tableStyles.dataText}>{val}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+      <Text style={tableStyles.hint}>Tap header to sort · Long press cell to copy</Text>
+    </View>
+  );
+}
+
+const tableStyles = StyleSheet.create({
+  wrapper: {
+    marginVertical: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    backgroundColor: '#1e293b',
+  },
+  headerCell: {
+    minWidth: 100,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#0f172a',
+  },
+  headerText: {
+    color: '#e2e8f0',
+    fontSize: 12.5,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  dataRow: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+  },
+  rowEven: {
+    backgroundColor: '#0b0f19',
+  },
+  rowOdd: {
+    backgroundColor: '#0f172a',
+  },
+  dataCell: {
+    minWidth: 100,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRightWidth: 1,
+    borderRightColor: '#1e293b',
+  },
+  cellHighlighted: {
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  dataText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  hint: {
+    fontSize: 10,
+    color: '#475569',
+    textAlign: 'right',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#0b0f19',
+  },
+});
+
+// ─── Main Renderer ───────────────────────────────────────────────────────────
+
 export function MarkdownRenderer({ text }: MarkdownRendererProps) {
   if (!text) return null;
-
-  // Split content by code blocks: ```[language] ... ```
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
-  const elements = [];
-  let lastIndex = 0;
-  let match;
 
   const handleCopyCode = (code: string) => {
     Clipboard.setString(code);
@@ -24,23 +216,28 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
     }
   };
 
+  // Split by code blocks first
+  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+  const elements: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+  let keyCount = 0;
+
   while ((match = codeBlockRegex.exec(text)) !== null) {
     const textBefore = text.substring(lastIndex, match.index);
     const language = match[1] || 'code';
     const code = match[2];
 
-    // Render plain text before code block
     if (textBefore.trim()) {
       elements.push(
-        <View key={`text-${match.index}`} style={styles.textContainer}>
-          {renderTextWithInlineFormatting(textBefore)}
+        <View key={`text-${keyCount++}`} style={styles.textContainer}>
+          {renderTextSegment(textBefore, keyCount)}
         </View>
       );
     }
 
-    // Render code block with VS Code syntax highlighting
     elements.push(
-      <View key={`code-${match.index}`} style={styles.codeBlockContainer}>
+      <View key={`code-${keyCount++}`} style={styles.codeBlockContainer}>
         <View style={styles.codeBlockHeader}>
           <Text style={styles.codeLanguage}>{language.toUpperCase()}</Text>
           <TouchableOpacity onPress={() => handleCopyCode(code)} style={styles.copyButton}>
@@ -57,14 +254,14 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
     );
 
     lastIndex = codeBlockRegex.lastIndex;
+    keyCount++;
   }
 
-  // Render remaining text after last code block
   const textAfter = text.substring(lastIndex);
   if (textAfter.trim()) {
     elements.push(
-      <View key={`text-end`} style={styles.textContainer}>
-        {renderTextWithInlineFormatting(textAfter)}
+      <View key={`text-end-${keyCount++}`} style={styles.textContainer}>
+        {renderTextSegment(textAfter, keyCount)}
       </View>
     );
   }
@@ -72,26 +269,64 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
   return <View style={styles.container}>{elements}</View>;
 }
 
+/**
+ * Renders a text segment, detecting markdown tables and splitting around them.
+ */
+function renderTextSegment(rawText: string, baseKey: number): React.ReactNode[] {
+  // Detect markdown table blocks (multi-line sequences with | chars)
+  // A table is: header row | separator row (with ---) | data rows
+  const tableBlockRegex = /(\|[^\n]*\n\|[\s\-:|]+\n(?:\|[^\n]*\n?)+)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIdx = 0;
+  let m;
+  let k = baseKey * 100;
+
+  while ((m = tableBlockRegex.exec(rawText)) !== null) {
+    const before = rawText.substring(lastIdx, m.index);
+    if (before) {
+      parts.push(
+        <React.Fragment key={`tf-${k++}`}>
+          {renderTextWithInlineFormatting(before)}
+        </React.Fragment>
+      );
+    }
+    const tableData = parseMarkdownTable(m[0]);
+    if (tableData) {
+      parts.push(<InteractiveTable key={`tbl-${k++}`} data={tableData} />);
+    } else {
+      parts.push(
+        <React.Fragment key={`traw-${k++}`}>
+          {renderTextWithInlineFormatting(m[0])}
+        </React.Fragment>
+      );
+    }
+    lastIdx = tableBlockRegex.lastIndex;
+  }
+
+  const remaining = rawText.substring(lastIdx);
+  if (remaining) {
+    parts.push(
+      <React.Fragment key={`tr-${k++}`}>
+        {renderTextWithInlineFormatting(remaining)}
+      </React.Fragment>
+    );
+  }
+  return parts;
+}
+
 // VS Code style syntax highlighter
 function highlightVSCode(code: string, language: string) {
-  // Pattern groups:
-  // 1. Comments: //... or #... or /*...*/
-  // 2. Strings: "..." or '...' or `...`
-  // 3. Keywords
-  // 4. Numbers
-  // 5. HTML tags
-  // 6. Function calls: word followed by paren
-  const tokenRegex = /(\/\/.*|#.*|\/\*[\s\S]*?\*\/)|(".*?"|'.*?'|`[\s\S]*?`)|(\b(?:const|let|var|function|return|class|import|export|from|def|if|else|while|for|in|try|except|as|print|self|public|private|static|void|int|float|string|bool)\b)|(\b\d+\b)|(<[^>]+>)|(\b\w+(?=\s*\())/g;
+  const tokenRegex = /(\/\/.*|#.*|\/\*[\s\S]*?\*\/)|(\".*?\"|'.*?'|`[\s\S]*?`)|(\b(?:const|let|var|function|return|class|import|export|from|def|if|else|while|for|in|try|except|as|print|self|public|private|static|void|int|float|string|bool)\b)|(\b\d+\b)|(<[^>]+>)|(\b\w+(?=\s*\())/g;
 
-  let match;
+  let matchH;
   let lastIndex = 0;
   let key = 0;
-  const elements = [];
+  const elements: React.ReactNode[] = [];
 
   tokenRegex.lastIndex = 0;
 
-  while ((match = tokenRegex.exec(code)) !== null) {
-    const textBefore = code.substring(lastIndex, match.index);
+  while ((matchH = tokenRegex.exec(code)) !== null) {
+    const textBefore = code.substring(lastIndex, matchH.index);
     if (textBefore) {
       elements.push(
         <Text key={`text-${key++}`} style={styles.codeTextDefault}>
@@ -100,12 +335,12 @@ function highlightVSCode(code: string, language: string) {
       );
     }
 
-    const comment = match[1];
-    const str = match[2];
-    const keyword = match[3];
-    const num = match[4];
-    const tag = match[5];
-    const func = match[6];
+    const comment = matchH[1];
+    const str = matchH[2];
+    const keyword = matchH[3];
+    const num = matchH[4];
+    const tag = matchH[5];
+    const func = matchH[6];
 
     if (comment) {
       elements.push(<Text key={`comment-${key++}`} style={styles.codeComment}>{comment}</Text>);
@@ -296,7 +531,7 @@ const styles = StyleSheet.create({
     height: 8,
   },
   codeBlockContainer: {
-    backgroundColor: '#1e1e1e', // VS Code editor background
+    backgroundColor: '#1e1e1e',
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#2d2d2d',
@@ -307,7 +542,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#252526', // VS Code title bar
+    backgroundColor: '#252526',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,
@@ -339,27 +574,27 @@ const styles = StyleSheet.create({
     color: '#d4d4d4',
   },
   codeTextDefault: {
-    color: '#d4d4d4', // VS Code standard text
+    color: '#d4d4d4',
   },
   codeComment: {
-    color: '#6a9955', // VS Code green
+    color: '#6a9955',
     fontStyle: 'italic',
   },
   codeString: {
-    color: '#ce9178', // VS Code brown-orange string
+    color: '#ce9178',
   },
   codeKeyword: {
-    color: '#c586c0', // VS Code purple keyword
+    color: '#c586c0',
     fontWeight: '600',
   },
   codeNumber: {
-    color: '#b5cea8', // VS Code light green number
+    color: '#b5cea8',
   },
   codeTag: {
-    color: '#569cd6', // VS Code blue XML/HTML tag
+    color: '#569cd6',
     fontWeight: '600',
   },
   codeFunction: {
-    color: '#dcdcaa', // VS Code yellow function name
+    color: '#dcdcaa',
   },
 });

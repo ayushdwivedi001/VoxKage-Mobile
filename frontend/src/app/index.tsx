@@ -1334,6 +1334,8 @@ window.onresize = () => {
             thinkingStatus={thinkingStatus}
             handleOpenCodeInPlayground={handleOpenCodeInPlayground}
             messageProjectIds={messageProjectIds}
+            token={token}
+            backendUrl={backendUrl}
           />
         )}
 

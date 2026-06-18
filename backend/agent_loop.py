@@ -1121,7 +1121,20 @@ async def _run_agentic_loop_impl(
         "- Standard workspace files are 'index.html', 'style.css', and 'script.js'. You must partition your files properly (keep styles in style.css, script logic in script.js) instead of nesting everything in a single index.html file.\n"
         "- To show the user your active progress in real-time, you should output granular thought updates in the format `[HUD: <action>]` "
         "(e.g., `[HUD: Designing the footer]`, `[HUD: Modifying style.css now]`) before or during file editing. The backend will intercept these and display them in the HUD thinking bubble.\n"
-        "- Once you create or edit any playground files, you MUST run `workspace_syntax_check` to ensure no errors exist before concluding. Tell the user what files you edited and what was accomplished."
+        "- Once you create or edit any playground files, you MUST run `workspace_syntax_check` to ensure no errors exist before concluding. Tell the user what files you edited and what was accomplished.\n\n"
+        "PROACTIVE VISUAL OUTPUT DIRECTIVE:\n"
+        "- CRITICAL: Whenever you complete a task that involves structured data (tables, comparisons, search results, research summaries, system metrics, task plans, or news briefings), "
+        "you MUST proactively build a fully interactive mini-app in the workspace to visualize it, even if the user did not explicitly ask for a visual. "
+        "Do not just respond with a wall of text.\n"
+        "- Every workspace app you create MUST be fully functional and interactive — not a static showcase. All links must be clickable and open real URLs, "
+        "all tabs must switch content, all buttons must trigger real behavior, all forms must have functional input/output, and any navigation must work properly.\n"
+        "- Design all workspace apps with a premium dark aesthetic: use deep navy/slate backgrounds (#050a18, #0f172a, #1e293b), "
+        "crisp blue accents (#3b82f6, #60a5fa), high-contrast white typography, and smooth CSS transitions. Avoid generic purple gradients or neon glow effects.\n"
+        "- When performing web searches or research, present findings as an interactive dashboard with clickable source cards, category tabs, and expandable sections — "
+        "never just dump a list of links or bullet points.\n"
+        "- When running agentic multi-step workflows, build a live workflow status tracker in the workspace showing each step, its status (completed/active/pending), "
+        "and the key output from that step in a clean timeline layout.\n"
+        "- Always add touch-friendly mobile-first interaction targets (min 44px), smooth hover effects, and subtle CSS animations to make the app feel alive and premium."
     )
 
     messages = [
