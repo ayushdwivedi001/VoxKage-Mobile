@@ -49,6 +49,10 @@ export default function ChatScreen() {
   const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
   const [isNewChat, setIsNewChat] = useState(true);
 
+  // Context & Compaction State
+  const [contextPercent, setContextPercent] = useState(0);
+  const [compactionProgress, setCompactionProgress] = useState<number | null>(null);
+
   // Models & Variant State
   const [models, setModels] = useState<string[]>([
     'deepseek-v4-flash-free',
@@ -328,9 +332,10 @@ window.onresize = () => {
   `;
 
   const formatModelName = (modelId: string) => {
-    if (modelId === 'deepseek-v4-flash-free') return 'DeepSeek Flash (Free)';
-    if (modelId === 'gemini-2.5-flash') return 'Gemini 2.5 Flash';
-    if (modelId === 'claude-3.5-sonnet') return 'Claude 3.5 Sonnet';
+    if (modelId === 'deepseek-v4-flash-free') return 'DeepSeek Flash';
+    if (modelId === 'deepseek-v4-flash') return 'DeepSeek Flash';
+    if (modelId === 'gemini-2.5-flash') return 'Gemini Flash';
+    if (modelId === 'claude-3.5-sonnet') return 'Claude 3.5';
     return modelId
       .split('-')
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -646,6 +651,7 @@ window.onresize = () => {
     setLoading(true);
     setMessages([]);
     setStreamingText('');
+    setContextPercent(0);
 
     if (token?.startsWith('mock-')) {
       setCurrentSessionId(sessionId);
@@ -727,6 +733,10 @@ window.onresize = () => {
         const data = JSON.parse(event.data);
         if (data.type === 'token') {
           updateStreamingText((prev) => prev + data.content);
+        } else if (data.type === 'context_sync') {
+          setContextPercent(data.percent);
+        } else if (data.type === 'compaction_progress') {
+          setCompactionProgress(data.progress);
         } else if (data.type === 'proxy_completion_request') {
           const { request_id, payload } = data;
           
@@ -815,6 +825,7 @@ window.onresize = () => {
 
           runProxyQuery();
         } else if (data.type === 'error') {
+          setCompactionProgress(null);
           let errorMsg = data.content;
           if (errorMsg && errorMsg.includes('Upstream error:')) {
             try {
@@ -853,6 +864,7 @@ window.onresize = () => {
             prev.map((s) => (s.id === sessionId ? { ...s, name: data.name } : s))
           );
         } else if (data.type === 'done') {
+          setCompactionProgress(null);
           const associatedProjectId = data.project_id || null;
           const currText = streamingTextRef.current;
           updateStreamingText('');
@@ -1125,6 +1137,8 @@ window.onresize = () => {
     }
 
     const userQuery = inputText.trim();
+
+
     const activeProject = activeEditingProjectId 
       ? projectsRef.current.find(p => p.id === activeEditingProjectId) 
       : null;
@@ -1466,6 +1480,7 @@ window.onresize = () => {
           projects={projects}
           setActiveEditingProjectId={setActiveEditingProjectId}
           handleStopGeneration={handleStopGeneration}
+          contextPercent={contextPercent}
         />
       </KeyboardAvoidingView>
 
@@ -1558,6 +1573,7 @@ window.onresize = () => {
           executeDeleteSession(id);
         }}
       />
+
     </View>
   );
 }

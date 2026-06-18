@@ -273,6 +273,7 @@ export const styles = StyleSheet.create({
   },
   capsulesContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 8,
     paddingHorizontal: 4,
@@ -1063,5 +1064,37 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
     textTransform: 'uppercase',
+  },
+  tooltipPopover: {
+    position: 'absolute',
+    bottom: 32,
+    right: 0,
+    backgroundColor: '#0c1222',
+    borderColor: '#1e293b',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    zIndex: 10001,
+    minWidth: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      },
+      default: {
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 4,
+      },
+    }),
+  },
+  tooltipPopoverText: {
+    color: '#94a3b8',
+    fontSize: 10,
+    fontWeight: '600',
   },
 });

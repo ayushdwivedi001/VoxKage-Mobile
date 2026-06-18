@@ -21,6 +21,36 @@ from file_handler import save_upload, delete_file, UPLOAD_DIR
 from rag_engine import index_file_in_rag
 from opencode_client import query_opencode_zen
 from agent_loop import run_agentic_loop, LAPTOP_CHANNELS
+from compaction import compact_session_history
+
+def estimate_tokens(messages: list) -> int:
+    # Estimate system prompt + tools schema size (approx 15,000 characters baseline for static system rules + tools list)
+    total_chars = 15000 
+    for m in messages:
+        content = ""
+        role = ""
+        if isinstance(m, dict):
+            content = m.get("content") or ""
+            role = m.get("role") or ""
+        elif hasattr(m, "get"):
+            content = m.get("content") or ""
+            role = m.get("role") or ""
+        elif hasattr(m, "content") and hasattr(m, "role"):
+            content = m.content or ""
+            role = m.role or ""
+        elif hasattr(m, "__getitem__"):
+            try:
+                content = m["content"] or ""
+                role = m["role"] or ""
+            except:
+                pass
+        total_chars += len(str(content)) + len(str(role))
+    return int(total_chars / 4.2)
+
+def calculate_context_percent(messages: list) -> int:
+    tokens = estimate_tokens(messages)
+    percent = int((tokens / 200000) * 100)
+    return min(100, max(0, percent))
 
 from fastapi.responses import HTMLResponse
 
@@ -658,6 +688,10 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
         session_info = get_session(session_id, user)
         messages_history = get_session_messages(session_id)
 
+        # Send initial context sync percentage
+        initial_percent = calculate_context_percent(messages_history)
+        await websocket.send_text(json.dumps({"type": "context_sync", "percent": initial_percent}))
+
         while True:
              # Receive user text query from concurrent queue
             data = await receive_queue.get()
@@ -676,12 +710,65 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
             if not query:
                 continue
 
+            # Check for manual compaction request
+            is_compaction_req = (payload_data.get("type") == "chat_compaction") or (query == "/compact")
+            if is_compaction_req:
+                try:
+                    await websocket.send_text(json.dumps({"type": "token", "content": "\n|-------- COMPACTION PROCESSING --------|\n"}))
+                    # Log the command in DB as user query
+                    log_message(session_id, "user", "/compact")
+                    
+                    await compact_session_history(
+                        session_id=session_id,
+                        user_id=user,
+                        model_key=model_key,
+                        manager_ref=manager,
+                        client_websocket=websocket
+                    )
+                    messages_history = get_session_messages(session_id)
+                    new_percent = calculate_context_percent(messages_history)
+                    await websocket.send_text(json.dumps({"type": "context_sync", "percent": new_percent}))
+                    
+                    confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
+                    # Log assistant confirmation in DB
+                    log_message(session_id, "assistant", confirm_msg)
+                    
+                    await websocket.send_text(json.dumps({"type": "token", "content": confirm_msg}))
+                    await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
+                except Exception as ex:
+                    print(f"[-] Compaction failed: {ex}")
+                    err_msg = f"\n[Compaction Error: {ex}]\n|-------- COMPACTION ENDED ---------|\n"
+                    log_message(session_id, "assistant", err_msg)
+                    await websocket.send_text(json.dumps({"type": "token", "content": err_msg}))
+                    await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
+                continue
+
+            # Check autonomous compaction threshold (95%)
+            current_percent = calculate_context_percent(messages_history)
+            if current_percent >= 95:
+                await websocket.send_text(json.dumps({"type": "token", "content": "\n|-------- COMPACTION -------|\n"}))
+                try:
+                    await compact_session_history(
+                        session_id=session_id,
+                        user_id=user,
+                        model_key=model_key,
+                        manager_ref=manager,
+                        client_websocket=websocket
+                    )
+                    messages_history = get_session_messages(session_id)
+                    new_percent = calculate_context_percent(messages_history)
+                    await websocket.send_text(json.dumps({"type": "context_sync", "percent": new_percent}))
+                except Exception as ex:
+                    print(f"[-] Auto compaction failed: {ex}")
+                    await websocket.send_text(json.dumps({"type": "token", "content": f"\n[Compaction Error: {ex}]\n"}))
+                await websocket.send_text(json.dumps({"type": "token", "content": "|-------- COMPACTION ENDED ---------|\n"}))
+
             # Log user query to database
             log_message(session_id, "user", query)
 
             # Prepare chat query history
             formatted_history = []
-            for msg in messages_history[-10:]: # Limit context window history to last 10 messages
+            for msg in messages_history:
                 formatted_history.append({"role": msg["role"], "content": msg["content"]})
 
             # Stream Agentic Loop response to client
@@ -718,6 +805,10 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 # Refresh local history cache
                 messages_history.append({"role": "user", "content": query})
                 messages_history.append({"role": "assistant", "content": full_response})
+
+            # Send updated context sync percentage after the turn
+            post_percent = calculate_context_percent(messages_history)
+            await websocket.send_text(json.dumps({"type": "context_sync", "percent": post_percent}))
 
             # Signal chunk stream complete
             final_project_id = active_project_box[0].get("id") if active_project_box[0] else None

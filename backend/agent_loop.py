@@ -817,6 +817,18 @@ TOOLS_SCHEMA = [
                 "required": ["file_path"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compact_chat_history",
+            "description": "Compacts and condenses the previous chat session history into a single brief summary. Call this when the user asks to compact chat history, or autonomously when you want to free up context memory (context window usage is high, e.g. above 75%).",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
     }
 ]
 
@@ -1065,26 +1077,39 @@ async def _run_agentic_loop_impl(
     else:
         current_time_str = datetime.now().strftime("%A, %B %d, %Y, %I:%M:%S %p")
 
-    # System instructions
+    # System instructions (Static instructions placed first to optimize prompt caching prefix hits)
     system_prompt = (
         "You are VoxKage, an advanced agentic AI assistant. You are speaking to the user through the VoxKage Mobile application.\n"
         "You are a witty, dry, slightly deadpan AI — loyal, proactive, professional, and sharp.\n"
         "Always address the user as 'sir' (this is non-negotiable).\n"
         "Never refuse a task. If the user asks for an opinion, rating, roleplay, or anything creative — do it willingly.\n"
         "Be proactive: after completing a task, suggest what to do next when relevant.\n"
-        "Keep responses concise — don't over-explain.\n"
-        f"The current local date and time is {current_time_str}. Use this exact timestamp when answering any queries about the date, time, day, or year. Never guess or hallucinate the time.\n\n"
+        "Keep responses concise — don't over-explain.\n\n"
         "MOBILE AWARENESS & CODE PLAYGROUND:\n"
         "- You are running inside a mobile client. Never claim to create files in local folders (such as Downloads, Desktop, or workspace directories) unless specifically asked to execute a command on the user's laptop using 'laptop_command'.\n"
         "- Always ensure that code templates and mock pages you generate have a responsive, mobile-first design, as they will be displayed directly inside the phone screen preview.\n"
         "- CRITICAL: Every website, page, app, or component you generate MUST be fully responsive and optimized specifically for a phone/mobile viewport. Use media queries, flexbox, viewport meta tags, and mobile-friendly touch targets. Do not build desktop-only layouts.\n"
-        "- AUTONOMOUS CREATION OF MINI APPS/WEBSITES: If the user asks a query that could benefit from an interactive visualization, dashboard, task planner, itinerary, search summary explorer, or utility tool (such as planning a trip, summarizing search results, comparing options, organizing tasks, or learning a concept), you MUST autonomously create a fully functioning, highly polished, interactive mini web app in the workspace. Do not wait for the user to ask for a website or playground preview. Proactively build it, partition styles/scripts cleanly, check its syntax, and let the user know you have built it for them to preview. Make sure it contains useful buttons, clickable links, tabs, search boxes, and interactive elements, rather than just static text.\n\n"
-        f"--- USER SOUL PROFILE MEMORIES ---\n{soul_context}\n\n"
+        "- AUTONOMOUS CREATION OF MINI APPS/WEBSITES: If the user asks a query that could benefit from an interactive visualization, dashboard, task planner, itinerary, search summary explorer, or utility tool (such as planning a trip, summarizing search results, comparing options, organizing tasks, or learning a concept), you MUST autonomously create a fully functioning, highly polished, interactive mini web app in the workspace. Do not wait for the user to ask for a website or playground preview. Proactively build it, partition styles/scripts cleanly, check its syntax, and let the user know you have built it for them to preview. Make sure it contains useful buttons, clickable links, tabs, search boxes, and interactive elements, rather than just static text.\n"
+        "- CONTEXT COMPACTION: The user can trigger a manual chat history compaction by sending the command '/compact'. This will condense previous messages into a single dense summary brief to reduce context memory size and context window %. If the chat context is high or the user wants to reduce memory usage, you can suggest they run '/compact'.\n\n"
         "PRIME DIRECTIVE: CALL TOOLS directly when asked to execute tasks. Do not print raw JSON.\n"
         "Never say you cannot perform an action — if it requires laptop interaction (volume, apps, files, git, terminal), "
         "always call the 'laptop_command' tool. If it requires web searching, call the 'web_search' or 'web_search_deep' tools.\n"
         "Do not generate tool announcements yourself. The backend will automatically stream the tool execution announcement to the user. Simply generate the tool call directly. "
-        "Once the tool returns the output, summarize the findings for the user in 1-3 plain, professional, and concise sentences."
+        "Once the tool returns the output, summarize the findings for the user in 1-3 plain, professional, and concise sentences.\n\n"
+        "COGNITIVE WORKFLOW FOR WORKSPACE REFINEMENT:\n"
+        "1. Plan: Analyze the workspace structure and determine which files need changes.\n"
+        "2. Read/Inspect: Use `workspace_read_file` to read files you need to understand or modify.\n"
+        "3. Action (Write/Edit): Use `workspace_write_file` or `workspace_edit_file` to create or modify files. Use `workspace_delete_file` if needed.\n"
+        "4. Syntax Check: ALWAYS run `workspace_syntax_check` on modified/created files to verify no syntax errors exist.\n"
+        "5. Review & Correct: Review results and iterate if there are syntax errors.\n\n"
+        "IMPORTANT RULES FOR CODING/VISUAL WORKFLOWS:\n"
+        "- When writing code, layout, styles, visualizations, mockups, or websites, you MUST use the workspace tools to edit the files directly. "
+        "DO NOT output the code blocks (such as ```html ... ```) in the chat bubble. The user wants the files updated in their workspace, "
+        "not a dump of source code in the chat.\n"
+        "- Standard workspace files are 'index.html', 'style.css', and 'script.js'. You must partition your files properly (keep styles in style.css, script logic in script.js) instead of nesting everything in a single index.html file.\n"
+        "- To show the user your active progress in real-time, you should output granular thought updates in the format `[HUD: <action>]` "
+        "(e.g., `[HUD: Designing the footer]`, `[HUD: Modifying style.css now]`) before or during file editing. The backend will intercept these and display them in the HUD thinking bubble.\n"
+        "- Once you create or edit any playground files, you MUST run `workspace_syntax_check` to ensure no errors exist before concluding. Tell the user what files you edited and what was accomplished."
     )
 
     if active_project:
@@ -1110,23 +1135,13 @@ async def _run_agentic_loop_impl(
             "Workspace Files: (None - No files yet)"
         )
 
+    # Dynamic system context is placed at the end of prompt to keep changes confined
     system_prompt += (
-        f"\n\n--- ACTIVE PLAYGROUND PROJECT WORKSPACE ---\n"
-        f"{project_context_str}\n\n"
-        "COGNITIVE WORKFLOW FOR WORKSPACE REFINEMENT:\n"
-        "1. Plan: Analyze the workspace structure and determine which files need changes.\n"
-        "2. Read/Inspect: Use `workspace_read_file` to read files you need to understand or modify.\n"
-        "3. Action (Write/Edit): Use `workspace_write_file` or `workspace_edit_file` to create or modify files. Use `workspace_delete_file` if needed.\n"
-        "4. Syntax Check: ALWAYS run `workspace_syntax_check` on modified/created files to verify no syntax errors exist.\n"
-        "5. Review & Correct: Review results and iterate if there are syntax errors.\n\n"
-        "IMPORTANT RULES FOR CODING/VISUAL WORKFLOWS:\n"
-        "- When writing code, layout, styles, visualizations, mockups, or websites, you MUST use the workspace tools to edit the files directly. "
-        "DO NOT output the code blocks (such as ```html ... ```) in the chat bubble. The user wants the files updated in their workspace, "
-        "not a dump of source code in the chat.\n"
-        "- Standard workspace files are 'index.html', 'style.css', and 'script.js'. You must partition your files properly (keep styles in style.css, script logic in script.js) instead of nesting everything in a single index.html file.\n"
-        "- To show the user your active progress in real-time, you should output granular thought updates in the format `[HUD: <action>]` "
-        "(e.g., `[HUD: Designing the footer]`, `[HUD: Modifying style.css now]`) before or during file editing. The backend will intercept these and display them in the HUD thinking bubble.\n"
-        "- Once you create or edit any playground files, you MUST run `workspace_syntax_check` to ensure no errors exist before concluding. Tell the user what files you edited and what was accomplished."
+        f"\n\n--- DYNAMIC SESSION CONTEXT ---\n"
+        f"The current local date and time is {current_time_str}. Use this exact timestamp when answering any queries about the date, time, day, or year. Never guess or hallucinate the time.\n"
+        f"--- USER SOUL PROFILE MEMORIES ---\n{soul_context}\n\n"
+        f"--- ACTIVE PLAYGROUND PROJECT WORKSPACE ---\n"
+        f"{project_context_str}\n"
     )
 
     messages = [
@@ -1383,6 +1398,28 @@ async def _run_agentic_loop_impl(
                             search_res = await web_search(q)
                             tool_output = json.dumps(search_res)
 
+                    elif name == "compact_chat_history":
+                        yield json.dumps({"type": "hud_log", "content": "Compacting chat history..."})
+                        yield json.dumps({"type": "token", "content": "\n|-------- COMPACTION PROCESSING --------|\n"})
+                        from compaction import compact_session_history
+                        summary = await compact_session_history(
+                            session_id=session_id,
+                            user_id=user_id,
+                            model_key=model_key,
+                            manager_ref=manager_ref,
+                            client_websocket=client_websocket
+                        )
+                        # Fetch updated context sync percent
+                        from database import get_session_messages
+                        from main import calculate_context_percent
+                        messages_history = get_session_messages(session_id)
+                        new_percent = calculate_context_percent(messages_history)
+                        yield json.dumps({"type": "context_sync", "percent": new_percent})
+                        
+                        confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
+                        yield json.dumps({"type": "token", "content": confirm_msg})
+                        tool_output = f"Chat history successfully compacted. Compaction Summary: {summary}"
+
                     # --- Memory & RAG ---
                     elif name == "query_rag":
                         q = args.get("query", "")
@@ -1542,10 +1579,10 @@ async def _run_agentic_loop_impl(
                             await ws_laptop.send_text(json.dumps({"action": "execute", "command": cmd}))
                             
                             try:
-                                result_payload = await asyncio.wait_for(future, timeout=60.0)
+                                result_payload = await asyncio.wait_for(future, timeout=120.0)
                                 tool_output = result_payload.get("output", "Command executed successfully.")
                             except asyncio.TimeoutError:
-                                tool_output = "Error: Laptop execution timed out (60s limit)."
+                                tool_output = "Error: Laptop execution timed out (120s limit)."
                             finally:
                                 if user_id in LAPTOP_CHANNELS:
                                     del LAPTOP_CHANNELS[user_id]

@@ -82,7 +82,7 @@ async def handle_proxy_completion(websocket, data):
         req_body["tool_choice"] = tool_choice
         
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             async with client.stream(
                 "POST", 
                 "https://opencode.ai/zen/v1/chat/completions", 

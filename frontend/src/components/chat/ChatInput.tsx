@@ -24,6 +24,7 @@ interface ChatInputProps {
   projects: any[];
   setActiveEditingProjectId: (id: string | null) => void;
   handleStopGeneration: () => void;
+  contextPercent: number;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -47,7 +48,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   projects,
   setActiveEditingProjectId,
   handleStopGeneration,
+  contextPercent,
 }) => {
+  const [showTooltip, setShowTooltip] = React.useState(false);
+  React.useEffect(() => {
+    if (showTooltip) {
+      const t = setTimeout(() => setShowTooltip(false), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [showTooltip]);
+
   return (
     <View style={styles.inputAreaContainer}>
       {showVariantDropdown && (
@@ -116,10 +126,59 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             color="#60a5fa"
           />
           <Text style={styles.capsuleText}>
-            Variant: {VARIANTS[activeVariantIndex]}
+            {VARIANTS[activeVariantIndex]}
           </Text>
           <Ionicons name="chevron-down" size={10} color="#94a3b8" />
         </TouchableOpacity>
+
+        <View style={{ position: 'relative' }}>
+          <TouchableOpacity
+            style={[
+              styles.capsule,
+              {
+                borderColor:
+                  contextPercent <= 50
+                    ? '#10b981'
+                    : contextPercent < 80
+                    ? '#f59e0b'
+                    : '#ef4444',
+              },
+            ]}
+            onPress={() => setShowTooltip(!showTooltip)}
+          >
+            <Ionicons
+              name="analytics-outline"
+              size={12}
+              color={
+                contextPercent <= 50
+                  ? '#10b981'
+                  : contextPercent < 80
+                  ? '#f59e0b'
+                  : '#ef4444'
+              }
+            />
+            <Text
+              style={[
+                styles.capsuleText,
+                {
+                  color:
+                    contextPercent <= 50
+                      ? '#10b981'
+                      : contextPercent < 80
+                      ? '#f59e0b'
+                      : '#ef4444',
+                },
+              ]}
+            >
+              {contextPercent}%
+            </Text>
+          </TouchableOpacity>
+          {showTooltip && (
+            <View style={styles.tooltipPopover}>
+              <Text style={styles.tooltipPopoverText}>Context Window</Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {/* Refining HUD Bar */}
