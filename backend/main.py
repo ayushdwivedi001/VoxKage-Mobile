@@ -4,6 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocke
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
+import asyncio
 from typing import List, Dict
 
 # --- Import Custom Backend Modules ---
@@ -600,6 +601,36 @@ async def upload_document(
 
 # --- WebSocket Chat Streaming Server ---
 
+async def chat_ws_reader(websocket: WebSocket, receive_queue: asyncio.Queue):
+    from opencode_proxy import PROXY_REQUESTS
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                payload_data = json.loads(data)
+                msg_type = payload_data.get("type")
+                if msg_type in ("proxy_completion_chunk", "proxy_completion_done", "proxy_completion_error"):
+                    request_id = payload_data.get("request_id")
+                    if request_id and request_id in PROXY_REQUESTS:
+                        # Map chunk, done, and error status types
+                        status_val = "chunk"
+                        if msg_type == "proxy_completion_done":
+                            status_val = "done"
+                        elif msg_type == "proxy_completion_error":
+                            status_val = "error"
+                        
+                        payload_data["status"] = status_val
+                        await PROXY_REQUESTS[request_id].put(payload_data)
+                    continue
+            except Exception:
+                pass
+            await receive_queue.put(data)
+    except WebSocketDisconnect:
+        await receive_queue.put(None)
+    except Exception as e:
+        await receive_queue.put(e)
+
+
 @app.websocket("/ws/chat/{session_id}")
 async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: str = Query(...)):
     """
@@ -619,6 +650,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
         return
 
     await manager.connect_chat(user, websocket)
+    receive_queue = asyncio.Queue()
+    reader_task = asyncio.create_task(chat_ws_reader(websocket, receive_queue))
 
     try:
         # Fetch current session details to check default names
@@ -626,8 +659,13 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
         messages_history = get_session_messages(session_id)
 
         while True:
-             # Receive user text query
-            data = await websocket.receive_text()
+             # Receive user text query from concurrent queue
+            data = await receive_queue.get()
+            if data is None:
+                break
+            if isinstance(data, Exception):
+                raise data
+
             payload_data = json.loads(data)
             query = payload_data.get("message", "").strip()
             model_key = payload_data.get("model", "deepseek-flash")
@@ -658,6 +696,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 manager_ref=manager,
                 active_project_box=active_project_box,
                 client_time=client_time,
+                client_websocket=websocket,
                 variant=variant
             )
             
@@ -689,8 +728,25 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
             if session_info.get("name") == "New Chat":
                 generated_title = None
                 try:
+                    from opencode_proxy import query_opencode_proxy
+                    from opencode_client import get_opencode_model
                     title_prompt = f"Summarize this query into a short, creative 3-5 word title for a chat thread (do not include quotes): '{query}'"
-                    generated_title = (await query_opencode_zen(title_prompt, model_key)).strip().replace('"', '')
+                    title_payload = {
+                        "model": get_opencode_model(model_key),
+                        "messages": [{"role": "user", "content": title_prompt}],
+                        "temperature": 0.7
+                    }
+                    title_chunks = []
+                    async for chunk in query_opencode_proxy(
+                        payload=title_payload,
+                        manager_ref=manager,
+                        user_id=user,
+                        client_websocket=websocket,
+                        timeout=15.0
+                    ):
+                        if not chunk.startswith("Error:"):
+                            title_chunks.append(chunk)
+                    generated_title = "".join(title_chunks).strip().replace('"', '')
                     if not generated_title:
                         raise ValueError("Empty title returned")
                 except Exception as e:
@@ -714,6 +770,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
     except Exception as e:
         print(f"WebSocket Error: {e}")
         manager.disconnect_chat(user, websocket)
+    finally:
+        reader_task.cancel()
 
 
 # --- WebSocket Remote Laptop Daemon Tunnel ---
@@ -744,6 +802,22 @@ async def websocket_laptop_endpoint(websocket: WebSocket, token: str = Query(...
             try:
                 payload_data = json.loads(data)
                 
+                # Check for client-side completions proxy feedback
+                msg_type = payload_data.get("type")
+                if msg_type in ("proxy_completion_chunk", "proxy_completion_done", "proxy_completion_error"):
+                    from opencode_proxy import PROXY_REQUESTS
+                    request_id = payload_data.get("request_id")
+                    if request_id and request_id in PROXY_REQUESTS:
+                        status_val = "chunk"
+                        if msg_type == "proxy_completion_done":
+                            status_val = "done"
+                        elif msg_type == "proxy_completion_error":
+                            status_val = "error"
+                        
+                        payload_data["status"] = status_val
+                        await PROXY_REQUESTS[request_id].put(payload_data)
+                    continue
+
                 # Check if it's a command execution response
                 if payload_data.get("type") == "execution_result":
                     future = LAPTOP_CHANNELS.get(user)

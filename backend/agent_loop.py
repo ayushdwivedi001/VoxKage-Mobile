@@ -4,6 +4,7 @@ import asyncio
 from typing import AsyncGenerator
 from database import log_message
 from opencode_client import OPENCODE_BASE_URL, get_opencode_model
+from opencode_proxy import query_opencode_proxy
 import requests
 import httpx
 from datetime import datetime
@@ -970,6 +971,7 @@ async def run_agentic_loop(
     manager_ref = None,
     active_project_box: list = None,
     client_time: str = None,
+    client_websocket = None,
     variant: str = "High"
 ) -> AsyncGenerator[str, None]:
     if active_project_box is None:
@@ -997,6 +999,7 @@ async def run_agentic_loop(
             manager_ref=manager_ref,
             active_project_box=active_project_box,
             client_time=client_time,
+            client_websocket=client_websocket,
             variant=variant
         ):
             yield chunk
@@ -1032,6 +1035,7 @@ async def _run_agentic_loop_impl(
     manager_ref = None,
     active_project_box: list = None,
     client_time: str = None,
+    client_websocket = None,
     variant: str = "High"
 ) -> AsyncGenerator[str, None]:
     """
@@ -1150,52 +1154,44 @@ async def _run_agentic_loop_impl(
         payload.update(get_variant_overrides(variant))
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as response:
-                    if response.status_code != 200:
-                        error_body = await response.aread()
-                        yield json.dumps({"type": "error", "content": f"Upstream error: {error_body.decode('utf-8', errors='ignore')}"})
-                        return
+            current_tool_calls = []
+            assistant_text = ""
+            hud_parser = HudStreamParser()
 
-                    current_tool_calls = []
-                    assistant_text = ""
-                    hud_parser = HudStreamParser()
+            # Delegate completion stream query to proxy client
+            async for delta in query_opencode_proxy(
+                payload=payload,
+                manager_ref=manager_ref,
+                user_id=user_id,
+                client_websocket=client_websocket
+            ):
+                # Check for errors returned in delta payload
+                if isinstance(delta, dict) and isinstance(delta.get("content"), str) and delta.get("content").startswith("Error:"):
+                    yield json.dumps({"type": "error", "content": delta.get("content")})
+                    return
 
-                    async for line in response.aiter_lines():
-                        if line:
-                            if line.startswith("data: "):
-                                data_str = line[6:].strip()
-                                if data_str == "[DONE]":
-                                    break
-                                
-                                try:
-                                    chunk = json.loads(data_str)
-                                    delta = chunk["choices"][0]["delta"]
-                                    
-                                    # Accumulate tool calls
-                                    if "tool_calls" in delta:
-                                        tcalls = delta["tool_calls"]
-                                        for tc in tcalls:
-                                            idx = tc.get("index", 0)
-                                            while len(current_tool_calls) <= idx:
-                                                current_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                                            
-                                            if tc.get("id"):
-                                                current_tool_calls[idx]["id"] = tc["id"]
-                                            if tc["function"].get("name"):
-                                                current_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
-                                            if tc["function"].get("arguments"):
-                                                current_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
-                                    
-                                    # Stream assistant content delta
-                                    if delta.get("content"):
-                                        content_delta = delta["content"]
-                                        for packet in hud_parser.feed(content_delta):
-                                            yield json.dumps(packet)
-                                            if packet["type"] == "token":
-                                                assistant_text += packet["content"]
-                                except:
-                                    pass
+                # Accumulate tool calls
+                if "tool_calls" in delta:
+                    tcalls = delta["tool_calls"]
+                    for tc in tcalls:
+                        idx = tc.get("index", 0)
+                        while len(current_tool_calls) <= idx:
+                            current_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        
+                        if tc.get("id"):
+                            current_tool_calls[idx]["id"] = tc["id"]
+                        if tc["function"].get("name"):
+                            current_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
+                        if tc["function"].get("arguments"):
+                            current_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
+                
+                # Stream assistant content delta
+                if delta.get("content"):
+                    content_delta = delta["content"]
+                    for packet in hud_parser.feed(content_delta):
+                        yield json.dumps(packet)
+                        if packet["type"] == "token":
+                            assistant_text += packet["content"]
 
             # Flush any leftover tokens in HUD parser
             for packet in hud_parser.flush():

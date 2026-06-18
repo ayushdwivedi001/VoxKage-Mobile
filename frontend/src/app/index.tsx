@@ -727,6 +727,93 @@ window.onresize = () => {
         const data = JSON.parse(event.data);
         if (data.type === 'token') {
           updateStreamingText((prev) => prev + data.content);
+        } else if (data.type === 'proxy_completion_request') {
+          const { request_id, payload } = data;
+          
+          const runProxyQuery = async () => {
+            try {
+              const response = await fetch('https://opencode.ai/zen/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${payload.api_key}`
+                },
+                body: JSON.stringify({
+                  model: payload.model,
+                  messages: payload.messages,
+                  tools: payload.tools,
+                  tool_choice: payload.tool_choice,
+                  temperature: payload.temperature,
+                  stream: true
+                })
+              });
+
+              if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`HTTP ${response.status}: ${text}`);
+              }
+
+              if (response.body && typeof response.body.getReader === 'function') {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+
+                  buffer += decoder.decode(value, { stream: true });
+                  const lines = buffer.split('\n');
+                  buffer = lines.pop() || '';
+
+                  for (const line of lines) {
+                    const cleanLine = line.replace(/^data:\s*/, '').trim();
+                    if (!cleanLine) continue;
+                    if (cleanLine === '[DONE]') continue;
+
+                    try {
+                      const chunk = JSON.parse(cleanLine);
+                      const delta = chunk.choices?.[0]?.delta;
+                      if (delta) {
+                        ws.send(JSON.stringify({
+                          type: 'proxy_completion_chunk',
+                          request_id,
+                          delta
+                        }));
+                      }
+                    } catch (e) {
+                      // skip parsing errors on partial chunks
+                    }
+                  }
+                }
+              } else {
+                // Fallback for native mobile platforms that don't support fetch streams
+                const resJson = await response.json();
+                const content = resJson.choices?.[0]?.message?.content || '';
+                const toolCalls = resJson.choices?.[0]?.message?.tool_calls;
+                ws.send(JSON.stringify({
+                  type: 'proxy_completion_chunk',
+                  request_id,
+                  delta: { content, tool_calls: toolCalls }
+                }));
+              }
+
+              ws.send(JSON.stringify({
+                type: 'proxy_completion_done',
+                request_id
+              }));
+
+            } catch (err: any) {
+              console.error('[-] Proxy completions execution failed:', err);
+              ws.send(JSON.stringify({
+                type: 'proxy_completion_error',
+                request_id,
+                error: err?.message || String(err)
+              }));
+            }
+          };
+
+          runProxyQuery();
         } else if (data.type === 'error') {
           let errorMsg = data.content;
           if (errorMsg && errorMsg.includes('Upstream error:')) {
