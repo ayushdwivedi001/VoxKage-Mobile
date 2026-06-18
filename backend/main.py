@@ -744,8 +744,13 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                         client_websocket=websocket,
                         timeout=15.0
                     ):
-                        if not chunk.startswith("Error:"):
-                            title_chunks.append(chunk)
+                        if isinstance(chunk, dict):
+                            err_msg = chunk.get("content")
+                            if err_msg and err_msg.startswith("Error:"):
+                                continue
+                            content = chunk.get("content", "")
+                            if content:
+                                title_chunks.append(content)
                     generated_title = "".join(title_chunks).strip().replace('"', '')
                     if not generated_title:
                         raise ValueError("Empty title returned")
