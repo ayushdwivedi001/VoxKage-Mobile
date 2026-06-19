@@ -582,37 +582,23 @@ window.onresize = () => {
     }
   };
 
-  const createNewSession = async () => {
-    if (token?.startsWith('mock-')) {
-      const newMockId = generateRandomId('mock');
-      const newMockSession: ChatSession = {
-        id: newMockId,
-        name: 'New Chat',
-        created_at: '2026-06-17',
-      };
-      setSessions((prev) => [newMockSession, ...prev]);
-      setCurrentSessionId(newMockId);
-      setMessages([]);
-      setIsNewChat(true);
+  const createNewSession = () => {
+    // If we're already on an empty/new chat, do nothing to prevent duplicate empty states
+    if (isNewChat && messages.length === 0 && !inputText.trim()) {
       closeSidebar();
       return;
     }
 
-    if (!token || !backendUrl) return;
-    try {
-      const response = await fetch(`${backendUrl}/sessions?name=New Chat`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+    setCurrentSessionId(null);
+    setMessages([]);
+    setIsNewChat(true);
+    setStreamingText('');
+    setContextPercent(0);
+    closeSidebar();
 
-      if (response.ok) {
-        const session = await response.json();
-        setSessions((prev) => [session, ...prev]);
-        selectSession(session.id);
-        closeSidebar();
-      }
-    } catch (e) {
-      showAlert('Error', 'Failed to create new session, Sir.');
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
     }
   };
 
@@ -1132,6 +1118,19 @@ window.onresize = () => {
     const staged = stagedAttachment;
 
     if (token?.startsWith('mock-')) {
+      let targetSessionId = currentSessionId;
+      if (!targetSessionId) {
+        const newMockId = generateRandomId('mock');
+        const newMockSession: ChatSession = {
+          id: newMockId,
+          name: 'New Chat',
+          created_at: '2026-06-17',
+        };
+        setSessions((prev) => [newMockSession, ...prev]);
+        setCurrentSessionId(newMockId);
+        targetSessionId = newMockId;
+      }
+
       const userQuery = inputText.trim();
       let displayMsg = userQuery;
       if (staged) {
