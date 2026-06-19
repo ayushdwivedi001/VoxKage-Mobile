@@ -389,6 +389,40 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginBottom: 6,
   },
+  sidebarSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0d0d0d',
+    borderWidth: 1,
+    borderColor: '#262626',
+    borderRadius: 8,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    paddingHorizontal: 8,
+    height: 36,
+  },
+  sidebarSearchIcon: {
+    marginRight: 6,
+  },
+  sidebarSearchInput: {
+    flex: 1,
+    color: '#f3f4f6',
+    fontSize: 13,
+    padding: 0,
+    height: '100%',
+    ...Platform.select({
+      web: {
+        outlineStyle: 'none',
+      } as any,
+      default: {},
+    }),
+  },
+  sidebarSearchClear: {
+    padding: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
   sessionsList: {
     flex: 1,
   },
@@ -1045,7 +1079,6 @@ export const styles = StyleSheet.create({
     padding: 6,
   },
   favSectionContainer: {
-    maxHeight: 200,
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
     paddingBottom: 8,

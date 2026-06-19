@@ -129,3 +129,24 @@ def delete_playground_project(project_id: str, user_id: str) -> dict:
     db = get_db()
     res = db.table("projects").delete().eq("id", project_id).eq("user_id", user_id).execute()
     return {"status": "success", "deleted_project_id": project_id}
+
+# --- User Settings (Favorite Models) ---
+def get_user_favorites(user_id: str) -> list:
+    db = get_db()
+    res = db.table("user_settings").select("favorite_models").eq("user_id", user_id).execute()
+    if not res.data:
+        return []
+    return res.data[0].get("favorite_models", [])
+
+def save_user_favorites(user_id: str, favorites: list) -> list:
+    db = get_db()
+    data = {
+        "user_id": user_id,
+        "favorite_models": favorites,
+        "updated_at": "now()"
+    }
+    res = db.table("user_settings").upsert(data).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Failed to save user favorites.")
+    return res.data[0].get("favorite_models", [])
+

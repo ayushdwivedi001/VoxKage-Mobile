@@ -51,6 +51,12 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   email,
   onPlaygroundPress,
 }) => {
+  const [searchQuery, setSearchQuery] = React.useState('');
+
+  const filteredSessions = sessions.filter(s =>
+    s.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <>
       {isOpen && (
@@ -84,8 +90,27 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
         </TouchableOpacity>
 
         <Text style={styles.historyLabel}>History</Text>
+
+        <View style={styles.sidebarSearchContainer}>
+          <Ionicons name="search-outline" size={14} color="#6b7280" style={styles.sidebarSearchIcon} />
+          <TextInput
+            style={styles.sidebarSearchInput}
+            placeholder="Search session chats..."
+            placeholderTextColor="#4b5563"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.sidebarSearchClear}>
+              <Ionicons name="close-circle" size={14} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
+        </View>
+
         <ScrollView style={styles.sessionsList} showsVerticalScrollIndicator={false}>
-          {sessions.map((s) => (
+          {filteredSessions.map((s) => (
             <View
               key={s.id}
               style={[

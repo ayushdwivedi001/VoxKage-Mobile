@@ -141,6 +141,21 @@ export default function ChatScreen() {
       : [...favorites, modelId];
     setFavorites(nextFavs);
     await storage.setFavoriteModels(nextFavs);
+
+    if (token && !token.startsWith('mock-') && backendUrl) {
+      try {
+        await fetch(`${backendUrl.trim().replace(/\/$/, '')}/user/favorites`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ favorites: nextFavs }),
+        });
+      } catch (e) {
+        console.error('Failed to sync favorites to cloud', e);
+      }
+    }
   };
 
   const showAlert = (title: string, message: string) => {
@@ -350,6 +365,24 @@ window.onresize = () => {
   async function fetchModels(url: string, jwtToken: string) {
     const storedFavs = await storage.getFavoriteModels();
     setFavorites(storedFavs);
+
+    if (jwtToken && !jwtToken.startsWith('mock-')) {
+      try {
+        const favsResponse = await fetch(`${url.trim().replace(/\/$/, '')}/user/favorites`, {
+          headers: { Authorization: `Bearer ${jwtToken}` },
+        });
+        if (favsResponse.ok) {
+          const favsData = await favsResponse.json();
+          const cloudFavs = favsData.favorite_models || [];
+          if (Array.isArray(cloudFavs)) {
+            setFavorites(cloudFavs);
+            await storage.setFavoriteModels(cloudFavs);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to fetch favorites from database', e);
+      }
+    }
 
     let rawList: string[] = [];
     if (jwtToken.startsWith('mock-')) {

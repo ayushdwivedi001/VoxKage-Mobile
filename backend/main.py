@@ -15,7 +15,7 @@ from auth import (
 from database import (
     create_session, list_sessions, get_session, update_session_name, delete_session,
     log_message, get_session_messages, save_playground_project, list_projects, get_project,
-    delete_playground_project
+    delete_playground_project, get_user_favorites, save_user_favorites
 )
 from file_handler import save_upload, delete_file, UPLOAD_DIR
 from rag_engine import index_file_in_rag
@@ -277,6 +277,10 @@ class SaveProjectRequest(BaseModel):
     files: dict | None = None
     project_id: str | None = None
 
+class SaveFavoritesRequest(BaseModel):
+    favorites: List[str]
+
+
 @app.post("/auth/master-login")
 def master_login(req: MasterLoginRequest):
     """
@@ -341,6 +345,21 @@ def get_single_project(project_id: str, user: str = Depends(get_current_user)):
 @app.delete("/projects/{project_id}")
 def delete_single_project(project_id: str, user: str = Depends(get_current_user)):
     return delete_playground_project(project_id, user)
+
+# --- User Settings (Favorite Models) ---
+
+@app.get("/user/favorites")
+def get_favorites(user: str = Depends(get_current_user)):
+    return {"favorite_models": get_user_favorites(user)}
+
+@app.post("/user/favorites")
+def save_favorites(
+    req: SaveFavoritesRequest,
+    user: str = Depends(get_current_user)
+):
+    saved_favs = save_user_favorites(user, req.favorites)
+    return {"favorite_models": saved_favs}
+
 
 @app.get("/projects/{project_id}/preview/{file_path:path}")
 def project_preview(
