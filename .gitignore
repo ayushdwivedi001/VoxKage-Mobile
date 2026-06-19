@@ -35,3 +35,6 @@ web-build/
 
 # Tests
 backend/test_*.py
+
+# Scratch files
+scratch/

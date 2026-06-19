@@ -3,7 +3,7 @@ import json
 import asyncio
 from typing import AsyncGenerator
 from database import log_message
-from opencode_client import OPENCODE_BASE_URL, get_opencode_model
+from opencode_client import OPENCODE_BASE_URL, get_opencode_model, sanitize_history_roles
 from opencode_proxy import query_opencode_proxy
 import requests
 import httpx
@@ -129,6 +129,50 @@ def cleanup_local_workspace(project_id: str):
             shutil.rmtree(base_dir)
         except Exception as e:
             print(f"Error cleaning up workspace {project_id}: {e}")
+
+def run_matplotlib_script(code: str, title: str) -> str:
+    """
+    Executes a matplotlib python script, captures the active plot,
+    and returns a base64-encoded markdown image tag.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import io
+    import base64
+
+    loc = {}
+    try:
+        # Pre-set style for premium dark layout matching app theme
+        plt.style.use('dark_background')
+        
+        import numpy as np
+        import pandas as pd
+        import sklearn
+        
+        exec_globals = {
+            "plt": plt,
+            "np": np,
+            "pd": pd,
+            "sklearn": sklearn,
+            "__builtins__": __builtins__
+        }
+        
+        exec(code, exec_globals, loc)
+        
+        if not plt.get_fignums():
+            return "Error: The code ran successfully but did not create any matplotlib figure/plot, Sir."
+            
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', transparent=True, dpi=160)
+        buf.seek(0)
+        img_str = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close('all')
+        
+        return f"![{title}](data:image/png;base64,{img_str})"
+    except Exception as e:
+        plt.close('all')
+        return f"Error executing plotting code: {str(e)}"
 
 # --- Define Tool Schemas ---
 TOOLS_SCHEMA = [
@@ -854,6 +898,21 @@ TOOLS_SCHEMA = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_matplotlib_script",
+            "description": "Execute a Python script containing matplotlib plotting commands, capture the resulting figure, and return it as a base64-encoded markdown image tag directly in the chat response. Use this when the user requests a chart, plot, regression line, or machine learning visualization. The code should plot on plt (matplotlib.pyplot) and do NOT call plt.show() or plt.savefig() as the tool will capture and close the plot automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The python code containing matplotlib/numpy/pandas/scikit-learn operations and plotting commands (e.g. plt.plot(...))."},
+                    "title": {"type": "string", "description": "A short descriptive title for the image alt text."}
+                },
+                "required": ["code", "title"]
+            }
+        }
     }
 ]
 
@@ -1122,11 +1181,11 @@ async def _run_agentic_loop_impl(
         "  1. <LinkCard title=\"Title\" url=\"https://...\" desc=\"Description\" />: Use this to display websites, search result links, documentation pages, or any URL. Never output raw link text, sir. Always wrap links in a <LinkCard />.\n"
         "  2. <Map lat=\"12.9716\" lng=\"77.5946\" label=\"Central Cafe\" />: Use this to display locations, directions, routes, address cards, or city points. It renders a beautiful, Leaflet dark-themed map natively inside the user's feed.\n"
         "  3. <ButtonRow buttons=\"Directions:geo:12.9716,77.5946|Call:tel:9876543210|Explore:https://...\" />: Use this to show action clusters. Format the 'buttons' attribute with pipe-separated ('|') label:action pairs. Actions can be web links (https://...), telephone dials (tel:...), or location links (geo:lat,lng).\n"
-        "  4. <Chart type=\"line|bar\" data=\"10,20,30,40\" labels=\"Jan,Feb,Mar,Apr\" />: Use this to present metrics, statistics, weather forecasts, system performance, or any comparison data. Both data and labels attributes must be comma-separated strings.\n"
-        "  5. <Carousel images=\"https://img1.jpg,https://img2.jpg\" />: Use this to present gallery collections or search result images in a swipable horizontal carousel.\n"
-        "  6. <Weather temp=\"24\" condition=\"Sunny\" humidity=\"60\" wind=\"12\" uv=\"3\" city=\"London\" />: Use this to show weather forecasts or current weather. It renders a premium light-themed card in the feed.\n"
-        "  7. <TaskList items=\"Task Title:success:git-branch:10m ago|Another Task:pending:sync:now\" />: Use this to show timelines of actions, background task logs, CLI/git executions, or checklists. Format the 'items' attribute with pipe-separated items. Each item must have the format: 'title:status:source:time' where status can be 'success', 'pending', or 'failed'; source can be any source name (e.g. 'git-branch', 'sync', 'laptop', 'globe'); time is a relative time (e.g. '10m ago', 'now').\n"
-        "- WEATHER INTEGRATION RULE: When asked about weather or forecasts, you MUST autonomously output the <Weather /> card at the top, followed by a <Chart type=\"line\" /> if displaying temperature progression, rather than using plain text descriptions, lists or generic text.\n"
+        "  4. <Carousel images=\"https://img1.jpg,https://img2.jpg\" />: Use this to present gallery collections or search result images in a swipable horizontal carousel.\n"
+        "  5. <Weather temp=\"24\" condition=\"Sunny\" humidity=\"60\" wind=\"12\" uv=\"3\" city=\"London\" />: Use this to show weather forecasts or current weather. It renders a premium light-themed card in the feed.\n"
+        "  6. <TaskList items=\"Task Title:success:git-branch:10m ago|Another Task:pending:sync:now\" />: Use this to show timelines of actions, background task logs, CLI/git executions, or checklists. Format the 'items' attribute with pipe-separated items. Each item must have the format: 'title:status:source:time' where status can be 'success', 'pending', or 'failed'; source can be any source name (e.g. 'git-branch', 'sync', 'laptop', 'globe'); time is a relative time (e.g. '10m ago', 'now').\n"
+        "- MATPLOTLIB CHARTING RULE: Whenever you need to show statistical data, graphs, trends, machine learning plots, or comparative data, you MUST call the 'run_matplotlib_script' tool to generate a professional, publication-quality chart rather than using plain text or the legacy <Chart /> tag. The tool returns a base64 markdown image that renders beautifully inside the feed, sir.\n"
+        "- WEATHER INTEGRATION RULE: When asked about weather or forecasts, you MUST autonomously output the <Weather /> card at the top, followed by a Matplotlib generated temperature chart using 'run_matplotlib_script', rather than using plain text descriptions, lists or generic text.\n"
         "- TASK TIMELINE / LOG TIMELINE RULE: Whenever performing a series of tasks, system checks, git commits, deployments, or running CLI tools, you MUST autonomously output a <TaskList /> card showing the progress logs and statuses instead of long text bullet points.\n"
         "- VERCEL URL HALLUCINATION PREVENTION: Never hallucinate Vercel URLs (like voxkage-mobile-workspace.vercel.app) or fake hosting links for projects. If the user runs a playground project or workspace app, it runs locally on their device, not on Vercel. Always explain that they can preview it in the interactive workspace tab or via the playground buttons.\n"
         "- GENERAL LAYOUT RULES: Focus on delivering visually organized premium outputs using these components. Avoid massive text blocks, long bulleted lists, and heavy amount of bloat. Rely on these visual cards, timeline feeds, and premium UI components to represent data, options, weather, logs, maps, and search results directly in the chat stream, sir.\n\n"
@@ -1225,7 +1284,7 @@ async def _run_agentic_loop_impl(
     ]
 
     if history:
-        for msg in history:
+        for msg in sanitize_history_roles(history):
             messages.append({"role": msg["role"], "content": msg["content"]})
 
     if image_base64:
@@ -1442,6 +1501,8 @@ async def _run_agentic_loop_impl(
                     announcement = f"\n*[Deleting workspace file: {args.get('file_path', '')}...]*\n\n"
                 elif name == "workspace_syntax_check":
                     announcement = f"\n*[Checking syntax for: {args.get('file_path', '')}...]*\n\n"
+                elif name == "run_matplotlib_script":
+                    announcement = f"\n*[Generating professional chart using Matplotlib...]*\n\n"
                 else:
                     announcement = f"\n*[Executing tool: {name}...]*\n\n"
 
@@ -1510,6 +1571,12 @@ async def _run_agentic_loop_impl(
                         confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
                         yield json.dumps({"type": "token", "content": confirm_msg})
                         tool_output = f"Chat history successfully compacted. Compaction Summary: {summary}"
+
+                    elif name == "run_matplotlib_script":
+                        c = args.get("code", "")
+                        t = args.get("title", "chart")
+                        yield json.dumps({"type": "hud_log", "content": f"Running Matplotlib script..."})
+                        tool_output = run_matplotlib_script(c, t)
 
                     # --- Memory & RAG ---
                     elif name == "query_rag":

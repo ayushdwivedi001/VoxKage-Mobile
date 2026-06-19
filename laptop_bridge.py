@@ -50,6 +50,16 @@ async def handle_proxy_completion(websocket, data):
     payload = data.get("payload", {})
     api_key = payload.get("api_key") or os.getenv("OPENCODE_API_KEY")
     model = payload.get("model")
+    
+    # Map human-readable model keys to OpenCode API model strings on client-side as fallback
+    MODEL_MAP = {
+        "deepseek-flash": "deepseek-v4-flash-free",
+        "gemini-flash": "gemini-2.5-flash",
+        "claude-sonnet": "claude-3.5-sonnet",
+    }
+    if model in MODEL_MAP:
+        model = MODEL_MAP[model]
+        
     messages = payload.get("messages")
     tools = payload.get("tools")
     tool_choice = payload.get("tool_choice")

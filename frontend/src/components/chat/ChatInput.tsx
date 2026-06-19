@@ -1,7 +1,39 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from './styles';
+
+const renderHighlightedText = (text: string) => {
+  if (!text) return null;
+  
+  if (text.startsWith('/')) {
+    const spaceIdx = text.indexOf(' ');
+    const cmd = spaceIdx !== -1 ? text.substring(0, spaceIdx) : text;
+    const rest = spaceIdx !== -1 ? text.substring(spaceIdx) : '';
+    
+    const isKnownCmd = ['/btw', '/drill', '/compact'].includes(cmd.toLowerCase()) ||
+                        ['/btw', '/drill', '/compact'].some(c => c.startsWith(cmd.toLowerCase()));
+                        
+    if (isKnownCmd) {
+      return (
+        <Text style={{ color: '#f8fafc' }}>
+          <Text
+            style={{
+              color: '#60a5fa',
+              fontWeight: 'bold',
+              textShadowColor: 'rgba(96, 165, 250, 0.4)',
+              textShadowRadius: 6,
+            }}
+          >
+            {cmd}
+          </Text>
+          {rest}
+        </Text>
+      );
+    }
+  }
+  return <Text style={{ color: '#f8fafc' }}>{text}</Text>;
+};
 
 interface ChatInputProps {
   inputText: string;
@@ -33,7 +65,10 @@ interface ChatInputProps {
   handleCameraPress: () => void;
   handlePhotosPress: () => void;
   handleFilesPress: () => void;
+  onKeyPress?: (e: any) => void;
+  showBtwOverlay?: boolean;
 }
+
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   inputText,
@@ -64,8 +99,18 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   handleCameraPress,
   handlePhotosPress,
   handleFilesPress,
+  onKeyPress,
+  showBtwOverlay,
 }) => {
   const [showTooltip, setShowTooltip] = React.useState(false);
+  const [inputHeight, setInputHeight] = React.useState(Platform.OS === 'web' ? 40 : 36);
+  const isBtwActive = !!(showBtwOverlay || (inputText && inputText.trim().startsWith('/btw')));
+
+  React.useEffect(() => {
+    if (!inputText) {
+      setInputHeight(Platform.OS === 'web' ? 40 : 36);
+    }
+  }, [inputText]);
   React.useEffect(() => {
     if (showTooltip) {
       const t = setTimeout(() => setShowTooltip(false), 2500);
@@ -297,13 +342,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </TouchableOpacity>
 
         <TextInput
-          style={styles.inputField}
+          style={[
+            styles.inputField,
+            { height: Math.max(Platform.OS === 'web' ? 40 : 36, Math.min(150, inputHeight)) }
+          ]}
           placeholder="Message VoxKage..."
           placeholderTextColor="#475569"
           value={inputText}
-          onChangeText={setInputText}
+          onChangeText={(text) => {
+            setInputText(text);
+            if (!text) {
+              setInputHeight(Platform.OS === 'web' ? 40 : 36);
+            }
+          }}
           multiline={true}
-        />
+          onKeyPress={onKeyPress}
+          onContentSizeChange={(e) => {
+            const h = e.nativeEvent.contentSize.height;
+            if (h > 0) {
+              setInputHeight(h);
+            }
+          }}
+        >
+          {renderHighlightedText(inputText)}
+        </TextInput>
 
         <TouchableOpacity onPress={handleVoicePress} style={styles.inputVoiceBtn}>
           <Ionicons
@@ -313,7 +375,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           />
         </TouchableOpacity>
 
-        {loading ? (
+        {loading && !isBtwActive ? (
           <TouchableOpacity
             onPress={handleStopGeneration}
             style={styles.inputSendBtn}

@@ -20,6 +20,7 @@ interface ChatFeedProps {
   thinkingStatus: string | null;
   handleOpenCodeInPlayground: (content: string, messageId: string) => void;
   messageProjectIds: Record<string, string>;
+  onDrillAnswer?: (answer: string) => void;
 }
 
 const hasCodeBlocks = (text: string) => {
@@ -34,6 +35,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   thinkingStatus,
   handleOpenCodeInPlayground,
   messageProjectIds,
+  onDrillAnswer,
 }) => {
   const data = [
     ...messages,
@@ -114,7 +116,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                 <LogoV size={18} />
               </View>
               <View style={[styles.assistantBubble, (hasBlocks || hasProject) && { minWidth: 160 }]}>
-                <MarkdownRenderer text={item.content} />
+                <MarkdownRenderer text={item.content} onDrillAnswer={onDrillAnswer} />
                 {item.id === 'streaming' && (
                   <View style={styles.typingIndicatorContainer}>
                     <ActivityIndicator size="small" color="#2563eb" />

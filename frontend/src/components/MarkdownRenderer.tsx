@@ -482,9 +482,72 @@ function TaskListComponent({ itemsString }: TaskListComponentProps) {
   );
 }
 
+// --- DrillQuestion Premium Scoping Questionnaire Component ---
+interface DrillQuestionProps {
+  id: string;
+  question: string;
+  optionsString: string;
+  current: string;
+  total: string;
+  onDrillAnswer?: (answer: string) => void;
+}
+
+function DrillQuestionComponent({ id, question, optionsString, current, total, onDrillAnswer }: DrillQuestionProps) {
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+
+  const options = optionsString.split('|').map(opt => {
+    const parts = opt.split(':');
+    return {
+      label: parts[0] || opt,
+      value: parts[1] || opt
+    };
+  }).filter(o => o.label);
+
+  const handleSelect = (val: string) => {
+    setSelectedOption(val);
+    if (onDrillAnswer) {
+      onDrillAnswer(val);
+    }
+  };
+
+  return (
+    <View style={styles.weatherCard}>
+      <View style={{ marginBottom: 12 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Specification Drill ({current}/{total})
+        </Text>
+        <Text style={{ fontSize: 15, fontWeight: '700', color: '#0f172a', marginTop: 4 }}>
+          {question}
+        </Text>
+      </View>
+
+      <View style={{ gap: 6 }}>
+        {options.map((opt, idx) => {
+          const isSelected = selectedOption === opt.value;
+          return (
+            <TouchableOpacity
+              key={`opt-${idx}`}
+              onPress={() => handleSelect(opt.value)}
+              disabled={selectedOption !== null}
+              style={[
+                styles.drillOptionButton,
+                isSelected && styles.drillOptionSelected
+              ]}
+            >
+              <Text style={styles.drillOptionText}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 // --- Tag-Based Custom Component Parser ---
-function parseCustomComponents(text: string, keyPrefix: string) {
-  const componentTagRegex = /<(LinkCard|Map|ButtonRow|Chart|Carousel|Weather|TaskList)\b([^>]*?)\/>/g;
+function parseCustomComponents(text: string, keyPrefix: string, onDrillAnswer?: (answer: string) => void) {
+  const componentTagRegex = /<(LinkCard|Map|ButtonRow|Chart|Carousel|Weather|TaskList|DrillQuestion)\b([^>]*?)\/>/g;
   const elements = [];
   let lastIndex = 0;
   let match;
@@ -564,6 +627,18 @@ function parseCustomComponents(text: string, keyPrefix: string) {
           itemsString={attrs.items || ''}
         />
       );
+    } else if (tagName === 'DrillQuestion') {
+      elements.push(
+        <DrillQuestionComponent
+          key={`component-${keyPrefix}-${match.index}`}
+          id={attrs.id || ''}
+          question={attrs.question || ''}
+          optionsString={attrs.options || ''}
+          current={attrs.current || '1'}
+          total={attrs.total || '1'}
+          onDrillAnswer={onDrillAnswer}
+        />
+      );
     }
 
     lastIndex = componentTagRegex.lastIndex;
@@ -583,9 +658,10 @@ function parseCustomComponents(text: string, keyPrefix: string) {
 
 interface MarkdownRendererProps {
   text: string;
+  onDrillAnswer?: (answer: string) => void;
 }
 
-export function MarkdownRenderer({ text }: MarkdownRendererProps) {
+export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps) {
   if (!text) return null;
 
   // Split content by code blocks: ```[language] ... ```
@@ -610,7 +686,7 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
 
     // Render plain text and dynamic components before code block
     if (textBefore.trim()) {
-      elements.push(...parseCustomComponents(textBefore, `before-${match.index}`));
+      elements.push(...parseCustomComponents(textBefore, `before-${match.index}`, onDrillAnswer));
     }
 
     // Render code block with VS Code syntax highlighting
@@ -637,7 +713,7 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
   // Render remaining text after last code block
   const textAfter = text.substring(lastIndex);
   if (textAfter.trim()) {
-    elements.push(...parseCustomComponents(textAfter, 'end'));
+    elements.push(...parseCustomComponents(textAfter, 'end', onDrillAnswer));
   }
 
   return <View style={styles.container}>{elements}</View>;
@@ -755,8 +831,21 @@ function renderTable(tableLines: string[], keyBase: number) {
     rows.push(rowParts.map(r => r.trim()));
   }
 
+  // Calculate dynamic column widths based on maximum text length
+  const maxCharsPerCol = headers.map((header, colIdx) => {
+    let maxLen = header.length;
+    rows.forEach(row => {
+      const cellText = row[colIdx] || '';
+      if (cellText.length > maxLen) {
+        maxLen = cellText.length;
+      }
+    });
+    return maxLen;
+  });
+
   const getCellWidth = (index: number) => {
-    return index === 0 ? 150 : 85;
+    const chars = maxCharsPerCol[index] || 10;
+    return Math.max(110, Math.min(320, chars * 8.5));
   };
 
   const getAlignStyle = (index: number) => {
@@ -1434,6 +1523,45 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#94a3b8',
     marginLeft: 10,
+  },
+  drillOptionButton: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        transition: 'all 0.2s ease',
+      } as any,
+      default: {},
+    }),
+  },
+  drillOptionSelected: {
+    borderColor: '#3b82f6',
+    borderWidth: 1.5,
+    backgroundColor: '#eff6ff',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 0 8px rgba(59, 130, 246, 0.25)',
+      } as any,
+      default: {
+        shadowColor: '#3b82f6',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 1,
+      },
+    }),
+  },
+  drillOptionText: {
+    color: '#0f172a',
+    fontSize: 13.5,
+    fontWeight: '600',
   },
 });
 

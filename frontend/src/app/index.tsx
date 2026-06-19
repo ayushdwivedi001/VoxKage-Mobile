@@ -35,6 +35,12 @@ const generateRandomId = (prefix: string = 'rand'): string => {
   return `${prefix}-${Math.floor(Math.random() * 10000000)}`;
 };
 
+const COMMANDS = [
+  { name: '/compact', desc: 'Compress active chat history.' },
+  { name: '/btw', desc: 'Ask a quick stateless side-question.' },
+  { name: '/drill', desc: 'Initiate structured requirements scoping.' },
+];
+
 export default function ChatScreen() {
   const [token, setToken] = useState<string | null>(null);
   const [backendUrl, setBackendUrl] = useState('');
@@ -104,6 +110,14 @@ export default function ChatScreen() {
   const [isPlaygroundOpen, setIsPlaygroundOpen] = useState(false);
   const [showSidebarSettings, setShowSidebarSettings] = useState(false);
 
+  // Slash Commands /btw & /drill states
+  const [showCommandPopup, setShowCommandPopup] = useState(false);
+  const [commandPopupActiveIndex, setCommandPopupActiveIndex] = useState(0);
+  const [showBtwOverlay, setShowBtwOverlay] = useState(false);
+  const [btwMessages, setBtwMessages] = useState<{ role: string; content: string }[]>([]);
+  const [btwLoading, setBtwLoading] = useState(false);
+
+
   const [sidebarAnim] = useState(() => new Animated.Value(-280));
   const [playgroundAnim] = useState(() => new Animated.Value(drawerWidth));
 
@@ -132,6 +146,39 @@ export default function ChatScreen() {
   useEffect(() => {
     projectsRef.current = projects;
   }, [projects]);
+
+  useEffect(() => {
+    if (inputText.startsWith('/')) {
+      const lowerInput = inputText.toLowerCase();
+      
+      const hasExactCommand = COMMANDS.some(cmd => 
+        lowerInput === cmd.name.toLowerCase() || 
+        lowerInput.startsWith(cmd.name.toLowerCase() + ' ')
+      );
+
+      if (hasExactCommand) {
+        setShowCommandPopup(false);
+        return;
+      }
+
+      const matches = COMMANDS.filter(cmd => 
+        cmd.name.toLowerCase().startsWith(lowerInput)
+      );
+
+      if (matches.length > 0) {
+        setShowCommandPopup(true);
+        setCommandPopupActiveIndex(prev => prev >= matches.length ? 0 : prev);
+      } else {
+        setShowCommandPopup(false);
+      }
+    } else {
+      setShowCommandPopup(false);
+    }
+  }, [inputText]);
+
+  const filteredCommands = inputText.startsWith('/')
+    ? COMMANDS.filter(cmd => cmd.name.toLowerCase().startsWith(inputText.toLowerCase()))
+    : [];
 
 
 
@@ -1112,8 +1159,100 @@ window.onresize = () => {
     openPlayground();
   };
 
+  const handleKeyPress = (e: any) => {
+    if (showCommandPopup && filteredCommands.length > 0) {
+      const key = e.nativeEvent.key;
+      if (key === 'ArrowDown') {
+        setCommandPopupActiveIndex(prev => (prev + 1) % filteredCommands.length);
+      } else if (key === 'ArrowUp') {
+        setCommandPopupActiveIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+      } else if (key === 'Enter') {
+        const activeCmd = filteredCommands[commandPopupActiveIndex];
+        if (activeCmd) {
+          setInputText(activeCmd.name + ' ');
+          setShowCommandPopup(false);
+        }
+      }
+    }
+  };
+
+  const handleDrillAnswer = (answer: string) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const clientTimeStr = new Date().toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+      const payload = JSON.stringify({
+        message: answer,
+        model: activeModel,
+        variant: VARIANTS[activeVariantIndex],
+        client_time: clientTimeStr,
+        active_project: null
+      });
+      wsRef.current.send(payload);
+      setMessages((prev) => [
+        ...prev,
+        { id: generateRandomId('user'), role: 'user', content: answer },
+      ]);
+      setLoading(true);
+      setStreamingText('');
+      setThinkingStatus('VoxKage is processing, Sir...');
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputText.trim() && !stagedAttachment) return;
+
+    const userQuery = inputText.trim();
+
+    // Check if side-channel (/btw) is active or initiated
+    if (showBtwOverlay || userQuery.startsWith('/btw')) {
+      const isInitial = !showBtwOverlay;
+      setInputText('');
+      setStagedAttachment(null);
+      setShowBtwOverlay(true);
+      setBtwLoading(true);
+
+      const prompt = isInitial && userQuery.startsWith('/btw') ? userQuery : userQuery;
+      const updatedMessages = [...(isInitial ? [] : btwMessages), { role: 'user', content: prompt }];
+      setBtwMessages(updatedMessages);
+
+      if (token?.startsWith('mock-')) {
+        setTimeout(() => {
+          setBtwMessages(prev => [...prev, { role: 'assistant', content: 'Certainly, Sir. This is a side-channel reply in mock mode. I can answer quick doubts here.' }]);
+          setBtwLoading(false);
+        }, 800);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${backendUrl.trim().replace(/\/$/, '')}/chat/btw`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ messages: updatedMessages })
+        });
+        if (response.ok) {
+          const resData = await response.json();
+          setBtwMessages(prev => [...prev, { role: 'assistant', content: resData.response }]);
+        } else {
+          setBtwMessages(prev => [...prev, { role: 'assistant', content: '[Error querying side-channel, Sir.]' }]);
+        }
+      } catch (err: any) {
+        setBtwMessages(prev => [...prev, { role: 'assistant', content: `[Error: ${err.message}]` }]);
+      } finally {
+        setBtwLoading(false);
+      }
+      return;
+    }
 
     const staged = stagedAttachment;
 
@@ -1131,7 +1270,6 @@ window.onresize = () => {
         targetSessionId = newMockId;
       }
 
-      const userQuery = inputText.trim();
       let displayMsg = userQuery;
       if (staged) {
         displayMsg = userQuery 
@@ -1251,7 +1389,6 @@ window.onresize = () => {
       }
     }
 
-    const userQuery = inputText.trim();
     let uploadedDocId: string | null = null;
 
     if (staged && staged.type === 'document') {
@@ -1740,7 +1877,33 @@ window.onresize = () => {
             thinkingStatus={thinkingStatus}
             handleOpenCodeInPlayground={handleOpenCodeInPlayground}
             messageProjectIds={messageProjectIds}
+            onDrillAnswer={handleDrillAnswer}
           />
+        )}
+
+        {/* Autocomplete suggestion popup */}
+        {showCommandPopup && filteredCommands.length > 0 && (
+          <View style={styles.commandPopupContainer}>
+            {filteredCommands.map((cmd, idx) => {
+              const isActive = commandPopupActiveIndex === idx;
+              return (
+                <TouchableOpacity
+                  key={cmd.name}
+                  style={[
+                    styles.commandPopupItem,
+                    isActive && styles.commandPopupActive
+                  ]}
+                  onPress={() => {
+                    setInputText(cmd.name + ' ');
+                    setShowCommandPopup(false);
+                  }}
+                >
+                  <Text style={styles.commandPopupText}>{cmd.name}</Text>
+                  <Text style={styles.commandPopupDesc}>{cmd.desc}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         )}
 
         {/* Input Bar Section */}
@@ -1753,6 +1916,7 @@ window.onresize = () => {
           isVoiceActive={isVoiceActive}
           uploadingFile={uploadingFile}
           loading={loading}
+          showBtwOverlay={showBtwOverlay}
           activeModel={activeModel}
           formatModelName={formatModelName}
           VARIANTS={VARIANTS}
@@ -1773,8 +1937,83 @@ window.onresize = () => {
           handleCameraPress={handleCameraPress}
           handlePhotosPress={handlePhotosPress}
           handleFilesPress={handleFilesPress}
+          onKeyPress={handleKeyPress}
         />
       </KeyboardAvoidingView>
+
+      {/* Stateless Side-Channel /btw Bottom Sheet Backdrop and Overlay */}
+      {showBtwOverlay && (
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
+          onPress={() => {
+            setShowBtwOverlay(false);
+            setBtwMessages([]);
+          }}
+        />
+      )}
+      {showBtwOverlay && (
+        <View style={styles.btwBottomSheet}>
+          <View style={styles.btwBottomSheetHeader}>
+            <Text style={styles.btwBottomSheetTitle}>BY THE WAY — SIDE DOUBT</Text>
+            <TouchableOpacity
+              onPress={() => {
+                setShowBtwOverlay(false);
+                setBtwMessages([]);
+              }}
+              style={styles.btwBottomSheetClose}
+            >
+              <Ionicons name="close" size={14} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={btwMessages}
+            keyExtractor={(_, idx) => `btw-${idx}`}
+            style={styles.btwBottomSheetContent}
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) => {
+              const isUser = item.role === 'user';
+              return (
+                <View style={{ marginVertical: 8, alignSelf: isUser ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                  <Text style={{
+                    fontSize: 9,
+                    fontWeight: '800',
+                    color: isUser ? '#f59e0b' : '#3b82f6',
+                    letterSpacing: 1.0,
+                    marginBottom: 4,
+                    alignSelf: isUser ? 'flex-end' : 'flex-start'
+                  }}>
+                    {isUser ? 'SIR' : 'VOXKAGE'}
+                  </Text>
+                  <View style={{
+                    backgroundColor: isUser ? 'rgba(59, 130, 246, 0.12)' : 'rgba(30, 41, 59, 0.45)',
+                    borderColor: isUser ? 'rgba(59, 130, 246, 0.35)' : 'rgba(255, 255, 255, 0.06)',
+                    borderWidth: 1,
+                    borderRadius: 16,
+                    borderTopRightRadius: isUser ? 2 : 16,
+                    borderTopLeftRadius: isUser ? 16 : 2,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    ...Platform.select({
+                      web: {
+                        boxShadow: isUser 
+                          ? '0 2px 8px rgba(59, 130, 246, 0.15)' 
+                          : '0 2px 8px rgba(0, 0, 0, 0.2)'
+                      } as any,
+                      default: {}
+                    })
+                  }}>
+                    <Text style={styles.btwMessageText}>{item.content}</Text>
+                  </View>
+                </View>
+              );
+            }}
+            ListFooterComponent={btwLoading ? (
+              <ActivityIndicator size="small" color="#3b82f6" style={{ marginVertical: 8 }} />
+            ) : null}
+          />
+        </View>
+      )}
 
       {/* Model Selection Overlay — Inline Bottom Sheet inside Phone Frame */}
       <ModelSelectionModal

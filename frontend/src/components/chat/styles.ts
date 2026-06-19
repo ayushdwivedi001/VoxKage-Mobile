@@ -85,7 +85,7 @@ export const styles = StyleSheet.create({
   },
   userBubbleWrapper: {
     alignSelf: 'flex-end',
-    maxWidth: '85%',
+    maxWidth: '92%',
     marginBottom: 4,
   },
   userBubble: {
@@ -103,7 +103,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     alignSelf: 'flex-start',
-    maxWidth: '90%',
+    maxWidth: '96%',
     marginBottom: 4,
   },
   assistantAvatar: {
@@ -123,6 +123,7 @@ export const styles = StyleSheet.create({
   },
   assistantBubble: {
     flexShrink: 1,
+    flexGrow: 1,
     backgroundColor: 'rgba(12, 18, 33, 0.45)',
     borderColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
@@ -216,12 +217,14 @@ export const styles = StyleSheet.create({
   },
   inputPill: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     backgroundColor: '#0f172a',
     borderWidth: 1,
     borderColor: '#1e293b',
     borderRadius: 24,
     paddingHorizontal: 6,
+    paddingBottom: 6,
+    paddingTop: 6,
     minHeight: 48,
     ...Platform.select({
       web: {
@@ -232,15 +235,16 @@ export const styles = StyleSheet.create({
   },
   inputAddBtn: {
     padding: 6,
+    marginBottom: Platform.OS === 'web' ? 2 : 0,
   },
   inputField: {
     flex: 1,
     color: '#f8fafc',
     fontSize: 14.5,
     paddingHorizontal: 8,
-    paddingTop: Platform.OS === 'web' ? 12 : 8,
-    paddingBottom: Platform.OS === 'web' ? 6 : 8,
-    maxHeight: 120,
+    paddingTop: Platform.OS === 'web' ? 8 : 6,
+    paddingBottom: Platform.OS === 'web' ? 8 : 6,
+    maxHeight: 150,
     ...Platform.select({
       web: {
         outlineStyle: 'none',
@@ -249,10 +253,12 @@ export const styles = StyleSheet.create({
     }),
   },
   inputVoiceBtn: {
-    padding: 6,
+    padding: 8,
+    marginBottom: Platform.OS === 'web' ? 1 : 0,
   },
   inputSendBtn: {
     padding: 4,
+    marginBottom: Platform.OS === 'web' ? 2 : 0,
   },
   sendCircle: {
     width: 32,
@@ -1207,5 +1213,138 @@ export const styles = StyleSheet.create({
       padding: 2,
       borderRadius: 10,
       backgroundColor: '#1e293b',
+    },
+    commandPopupContainer: {
+      position: 'absolute',
+      bottom: 60,
+      left: 12,
+      right: 12,
+      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(59, 130, 246, 0.2)',
+      paddingVertical: 6,
+      zIndex: 100,
+      ...Platform.select({
+        web: {
+          backdropFilter: 'blur(16px)',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
+        } as any,
+        default: {},
+      }),
+    },
+    commandPopupItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+    },
+    commandPopupActive: {
+      backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    },
+    commandPopupText: {
+      color: '#3b82f6',
+      fontSize: 13,
+      fontWeight: '600',
+      marginRight: 8,
+    },
+    commandPopupDesc: {
+      color: '#94a3b8',
+      fontSize: 12,
+      flex: 1,
+    },
+    btwBottomSheet: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: Platform.OS === 'web' ? '45%' : 340,
+      backgroundColor: 'rgba(10, 15, 30, 0.95)',
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      borderTopWidth: 1.5,
+      borderTopColor: 'rgba(59, 130, 246, 0.35)',
+      padding: 16,
+      zIndex: 999,
+      ...Platform.select({
+        web: {
+          backdropFilter: 'blur(20px)',
+          boxShadow: '0 -4px 30px rgba(0, 0, 0, 0.65)',
+        } as any,
+        default: {},
+      }),
+    },
+    btwBottomSheetHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+      paddingBottom: 10,
+      marginBottom: 10,
+    },
+    btwBottomSheetTitle: {
+      color: '#93c5fd',
+      fontSize: 11.5,
+      fontWeight: '800',
+      letterSpacing: 1.6,
+    },
+    btwBottomSheetClose: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+      borderWidth: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    btwBottomSheetContent: {
+      flex: 1,
+    },
+    btwMessageText: {
+      color: '#e2e8f0',
+      fontSize: 13.5,
+      lineHeight: 20,
+      fontWeight: '400',
+    },
+    drillOptionButton: {
+      backgroundColor: '#ffffff',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      marginVertical: 4,
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...Platform.select({
+        web: {
+          transition: 'all 0.2s ease',
+        } as any,
+        default: {},
+      }),
+    },
+    drillOptionSelected: {
+      borderColor: '#3b82f6',
+      borderWidth: 1.5,
+      backgroundColor: '#eff6ff',
+      ...Platform.select({
+        web: {
+          boxShadow: '0 0 8px rgba(59, 130, 246, 0.25)',
+        } as any,
+        default: {
+          shadowColor: '#3b82f6',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.25,
+          shadowRadius: 4,
+          elevation: 1,
+        },
+      }),
+    },
+    drillOptionText: {
+      color: '#0f172a',
+      fontSize: 13.5,
+      fontWeight: '600',
     },
   });

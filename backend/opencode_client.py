@@ -19,6 +19,33 @@ def get_opencode_model(model_key: str) -> str:
         return MODEL_MAP[model_key]
     return model_key
 
+def sanitize_history_roles(history: list) -> list:
+    """
+    Sanitizes message history by mapping non-standard roles (like 'laptop') 
+    to standard roles (like 'user') to prevent upstream LLM API errors.
+    """
+    sanitized = []
+    if not history:
+        return sanitized
+    for msg in history:
+        if isinstance(msg, dict):
+            role = msg.get("role")
+            content = msg.get("content") or ""
+        else:
+            role = getattr(msg, "role", None)
+            content = getattr(msg, "content", None) or ""
+            
+        # Map 'laptop' to 'user' with a clear prefix so the LLM understands it's a tool output
+        if role == "laptop":
+            role = "user"
+            content = f"[Laptop Command Output]:\n{content}"
+        elif role not in ("system", "user", "assistant", "tool"):
+            # Fallback for any other unexpected role
+            role = "user"
+            
+        sanitized.append({"role": role, "content": content})
+    return sanitized
+
 async def query_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history: list = None) -> str:
     """
     Standard asynchronous query returning the full text block response.
@@ -52,7 +79,7 @@ async def query_opencode_zen(prompt: str, model_key: str = "deepseek-flash", his
     })
 
     if history:
-        for msg in history:
+        for msg in sanitize_history_roles(history):
             messages.append({"role": msg["role"], "content": msg["content"]})
             
     messages.append({"role": "user", "content": prompt})
@@ -111,7 +138,7 @@ def stream_opencode_zen(prompt: str, model_key: str = "deepseek-flash", history:
     ]
 
     if history:
-        for msg in history:
+        for msg in sanitize_history_roles(history):
             messages.append({"role": msg["role"], "content": msg["content"]})
 
     messages.append({"role": "user", "content": prompt})

@@ -150,3 +150,25 @@ def save_user_favorites(user_id: str, favorites: list) -> list:
         raise HTTPException(status_code=500, detail="Failed to save user favorites.")
     return res.data[0].get("favorite_models", [])
 
+
+# --- User Settings (Active Drill Sessions) ---
+def get_user_drill_session(user_id: str) -> dict | None:
+    db = get_db()
+    res = db.table("user_settings").select("active_drill").eq("user_id", user_id).execute()
+    if not res.data:
+        return None
+    return res.data[0].get("active_drill")
+
+def save_user_drill_session(user_id: str, drill_state: dict | None) -> dict | None:
+    db = get_db()
+    data = {
+        "user_id": user_id,
+        "active_drill": drill_state,
+        "updated_at": "now()"
+    }
+    res = db.table("user_settings").upsert(data).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Failed to save active drill session.")
+    return res.data[0].get("active_drill")
+
+

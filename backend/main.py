@@ -15,7 +15,8 @@ from auth import (
 from database import (
     create_session, list_sessions, get_session, update_session_name, delete_session,
     log_message, get_session_messages, save_playground_project, list_projects, get_project,
-    delete_playground_project, get_user_favorites, save_user_favorites
+    delete_playground_project, get_user_favorites, save_user_favorites,
+    get_user_drill_session, save_user_drill_session
 )
 from file_handler import save_upload, delete_file, UPLOAD_DIR
 from rag_engine import index_file_in_rag
@@ -281,6 +282,16 @@ class SaveFavoritesRequest(BaseModel):
     favorites: List[str]
 
 
+class BtwMessage(BaseModel):
+    role: str
+    content: str
+
+
+class BtwRequest(BaseModel):
+    messages: List[BtwMessage]
+
+
+
 @app.post("/auth/master-login")
 def master_login(req: MasterLoginRequest):
     """
@@ -359,6 +370,101 @@ def save_favorites(
 ):
     saved_favs = save_user_favorites(user, req.favorites)
     return {"favorite_models": saved_favs}
+
+async def query_llm_proxied(prompt: str, model_key: str = "deepseek-flash", history: list = None, user_id: str = None) -> str:
+    """
+    Queries LLM. If user_id is provided and they have a connected laptop bridge or chat WebSocket,
+    it proxies the completions query to bypass rate limits. Otherwise, it raises an error.
+    """
+    from opencode_proxy import query_opencode_proxy
+    
+    # 1. Try to find a connected laptop daemon
+    laptop_ws = None
+    if user_id and manager:
+        laptop_ws = manager.active_laptops.get(user_id)
+        
+    # 2. Try to find a connected chat client (mobile app itself)
+    client_ws = None
+    if not laptop_ws and user_id and manager:
+        chat_wss = manager.active_chats.get(user_id, [])
+        if chat_wss:
+            client_ws = chat_wss[0]
+            
+    target_ws = laptop_ws or client_ws
+    
+    if target_ws:
+        # Build messages list format for OpenCode proxy API format
+        system_prompt = (
+            "You are VoxKage, an advanced OS-level agentic AI assistant.\n"
+            "You are a witty, dry, slightly deadpan AI with a distinct personality — loyal, proactive, professional, and sharp.\n"
+            "Always address the user as 'sir' (this is non-negotiable).\n"
+            "Never refuse a task. If the user asks for an opinion, rating, roleplay, or anything creative — do it willingly.\n"
+            "Be proactive: after completing a task, suggest what to do next when relevant.\n"
+            "Keep responses concise — don't over-explain.\n"
+            "The current year is 2026. Prioritize current 2026 data and context."
+        )
+        messages = [{"role": "system", "content": system_prompt}]
+        from opencode_client import get_opencode_model, sanitize_history_roles
+        if history:
+            for msg in sanitize_history_roles(history):
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": prompt})
+        model_id = get_opencode_model(model_key)
+        payload = {
+            "model": model_id,
+            "messages": messages,
+            "temperature": 0.7
+        }
+        chunks = []
+        # Target either the laptop ws or mobile ws
+        async for chunk in query_opencode_proxy(payload, manager, user_id, client_websocket=target_ws):
+            if isinstance(chunk, dict):
+                content_val = chunk.get("content")
+                if isinstance(content_val, str):
+                    if content_val.startswith("Error:"):
+                        raise Exception(content_val)
+                    chunks.append(content_val)
+            elif isinstance(chunk, str):
+                chunks.append(chunk)
+        return "".join(chunks)
+    else:
+        # User specified no fallback to server IP to prevent rate limits!
+        raise Exception(
+            "No active laptop bridge daemon or mobile app client connected to proxy the completion request, Sir. "
+            "Please ensure the laptop bridge client or mobile app is active to route completions."
+        )
+
+
+@app.post("/chat/btw")
+async def chat_btw(
+    req: BtwRequest,
+    user: str = Depends(get_current_user)
+):
+    try:
+        system_instructions = (
+            "You are VoxKage, a witty, dry, slightly deadpan AI assisting 'sir'.\n"
+            "This is a stateless '/btw' side-channel query. Respond shortly, "
+            "concisely, and with absolute precision. Do not output custom layout tags (like LinkCard, Weather, Map), "
+            "just simple markdown text, sir."
+        )
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="Messages list cannot be empty.")
+            
+        history = [{"role": "system", "content": system_instructions}]
+        for msg in req.messages[:-1]:
+            history.append({"role": msg.role, "content": msg.content})
+            
+        prompt = req.messages[-1].content
+        if prompt.startswith("/btw "):
+            prompt = prompt[5:]
+        elif prompt.startswith("/btw"):
+            prompt = prompt[4:]
+            
+        response = await query_llm_proxied(prompt=prompt, model_key="deepseek-flash", history=history, user_id=user)
+        return {"response": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query side-channel: {str(e)}")
+
 
 
 @app.get("/projects/{project_id}/preview/{file_path:path}")
@@ -764,6 +870,134 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
 
             if not query:
                 continue
+
+            # --- Check for active /drill session or /drill start command ---
+            active_drill = get_user_drill_session(user)
+            
+            if query.startswith("/drill ") or query == "/drill":
+                # Clear active drill session if any
+                save_user_drill_session(user, None)
+                
+                goal = query[7:].strip()
+                if not goal:
+                    msg = "Please specify a goal to drill, Sir. (e.g. `/drill build a basic calculator`)"
+                    await websocket.send_text(json.dumps({"type": "token", "content": msg}))
+                    await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
+                    continue
+                
+                # Determine N questions based on keywords
+                lower_goal = goal.lower()
+                if any(w in lower_goal for w in ["calculator", "to-do", "todo", "basic", "simple", "note"]):
+                    num_q = 2
+                elif any(w in lower_goal for w in ["advanced", "research", "clone", "platform", "system", "architecture"]):
+                    num_q = 5
+                else:
+                    num_q = 3
+                
+                await websocket.send_text(json.dumps({"type": "token", "content": f"[HUD: Structuring clarifying questions for: '{goal}']\n"}))
+                
+                # Query LLM to plan questions in JSON format
+                system_instructions = (
+                    "You are a master software architect and requirements engineer assisting 'sir'.\n"
+                    f"Generate exactly {num_q} multiple-choice questions to clarify and scope the details of the following user request:\n"
+                    f"'{goal}'\n"
+                    "Format the output strictly as a JSON array of objects, where each object has:\n"
+                    "  - 'question': The question string (keep it concise)\n"
+                    "  - 'options': A list of string options (exactly 2 to 4 options, each option must be short like 1-3 words)\n"
+                    "Do not output markdown code blocks (```), HTML, or any conversational text. Just output the raw JSON array."
+                )
+                
+                try:
+                    res_raw = await query_llm_proxied(prompt=system_instructions, model_key=model_key, user_id=user)
+                    import re
+                    clean_res = res_raw.strip()
+                    if clean_res.startswith("```"):
+                        clean_res = re.sub(r"^```(?:json)?\n", "", clean_res)
+                        clean_res = re.sub(r"\n```$", "", clean_res)
+                        clean_res = clean_res.strip()
+                    
+                    questions = json.loads(clean_res)
+                    if not isinstance(questions, list) or len(questions) == 0:
+                        raise ValueError("Invalid format returned by model.")
+                        
+                    drill_state = {
+                        "goal": goal,
+                        "questions": questions,
+                        "current_index": 0,
+                        "answers": []
+                    }
+                    save_user_drill_session(user, drill_state)
+                    
+                    # Log start message
+                    log_message(session_id, "user", query)
+                    
+                    # Yield first question card
+                    first_q = questions[0]
+                    options_str = "|".join([f"{opt}:{opt}" for opt in first_q["options"]])
+                    tag = f'<DrillQuestion id="q0" question="{first_q["question"]}" options="{options_str}" current="1" total="{len(questions)}" />'
+                    
+                    log_message(session_id, "assistant", tag)
+                    await websocket.send_text(json.dumps({"type": "token", "content": tag}))
+                    await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
+                    
+                except Exception as ex:
+                    print(f"[-] Drill initiation failed: {ex}")
+                    err_msg = f"[Failed to structure questions for: '{goal}'. Please try again, Sir.]"
+                    await websocket.send_text(json.dumps({"type": "token", "content": err_msg}))
+                    await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
+                continue
+
+            elif active_drill is not None:
+                # User is responding to an active drill
+                # If they want to cancel/exit
+                if query.lower() in ["/cancel", "/exit", "cancel", "exit"]:
+                    save_user_drill_session(user, None)
+                    log_message(session_id, "user", query)
+                    log_message(session_id, "assistant", "[Drill session canceled, Sir.]")
+                    await websocket.send_text(json.dumps({"type": "token", "content": "[Drill session canceled, Sir.]"}))
+                    await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
+                    continue
+                
+                # Append answer to current question
+                questions = active_drill["questions"]
+                idx = active_drill["current_index"]
+                
+                active_drill["answers"].append(query)
+                active_drill["current_index"] += 1
+                new_idx = active_drill["current_index"]
+                
+                log_message(session_id, "user", query)
+                
+                if new_idx < len(questions):
+                    # Save state
+                    save_user_drill_session(user, active_drill)
+                    
+                    # Yield next question card
+                    next_q = questions[new_idx]
+                    options_str = "|".join([f"{opt}:{opt}" for opt in next_q["options"]])
+                    tag = f'<DrillQuestion id="q{new_idx}" question="{next_q["question"]}" options="{options_str}" current="{new_idx + 1}" total="{len(questions)}" />'
+                    
+                    log_message(session_id, "assistant", tag)
+                    await websocket.send_text(json.dumps({"type": "token", "content": tag}))
+                    await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
+                    continue
+                else:
+                    # All questions answered! Clear state and reformulate query
+                    save_user_drill_session(user, None)
+                    
+                    # Construct HUD log showing compaction/consolidation of answers
+                    hud_log = "[HUD: Consolidating answers and starting execution]\n"
+                    await websocket.send_text(json.dumps({"type": "token", "content": hud_log}))
+                    
+                    # Formulate enriched query
+                    enriched_parts = [f"Goal: {active_drill['goal']}\nDetailed user specifications:"]
+                    for i, q in enumerate(questions):
+                        ans = active_drill["answers"][i]
+                        enriched_parts.append(f"- {q['question']}: {ans}")
+                    
+                    enriched_query = "\n".join(enriched_parts)
+                    query = enriched_query
+                    # Continue down to normal execution with the enriched query!
 
             # Check for manual compaction request
             is_compaction_req = (payload_data.get("type") == "chat_compaction") or (query == "/compact")
