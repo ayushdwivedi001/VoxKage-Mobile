@@ -257,45 +257,58 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
           <View style={{ flex: 1, backgroundColor: '#0d0d0d' }}>
             {viewMode === 'sandbox' ? (
               <View style={styles.sandboxContainer}>
-                {Platform.OS === 'web' ? (
-                  // @ts-ignore
-                  <iframe
-                    key={`sb-${playgroundRevision}`}
-                    src={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
-                      ? undefined
-                      : `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}&session_id=${currentSessionId || ''}`
-                    }
-                    srcDoc={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
-                      ? compiledSandboxHtml
-                      : undefined
-                    }
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      border: 'none',
-                      width: '100%',
-                      height: '100%',
-                      backgroundColor: '#0d0d0d'
-                    }}
-                    title="Code Preview Sandbox"
-                  />
-                ) : (
-                  <WebView
-                    key={`sb-wv-${playgroundRevision}`}
-                    originWhitelist={['*']}
-                    source={!playgroundProjectId || playgroundProjectId.startsWith('mock-')
-                      ? { html: compiledSandboxHtml }
-                      : { uri: `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}&session_id=${currentSessionId || ''}` }
-                    }
-                    style={styles.webView}
-                    javaScriptEnabled={true}
-                    domStorageEnabled={true}
-                    backgroundColor="#0d0d0d"
-                  />
-                )}
+                {(() => {
+                  const activeProj = projects.find(p => p.id === playgroundProjectId);
+                  const projectFiles = activeProj?.files || {};
+                  // If the project only has index.html, style.css, and script.js (the typical single page case),
+                  // we can preview completely locally using compiledSandboxHtml to bypass cross-origin cookie blocking.
+                  const hasOtherFiles = Object.keys(projectFiles).some(
+                    f => f !== 'index.html' && f !== 'style.css' && f !== 'script.js'
+                  );
+                  const useLocalPreview = !playgroundProjectId || playgroundProjectId.startsWith('mock-') || !hasOtherFiles;
+
+                  if (Platform.OS === 'web') {
+                    return (
+                      // @ts-ignore
+                      <iframe
+                        key={`sb-${playgroundRevision}`}
+                        src={useLocalPreview
+                          ? undefined
+                          : `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}&session_id=${currentSessionId || ''}`
+                        }
+                        srcDoc={useLocalPreview ? compiledSandboxHtml : undefined}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          border: 'none',
+                          width: '100%',
+                          height: '100%',
+                          backgroundColor: '#0d0d0d'
+                        }}
+                        title="Code Preview Sandbox"
+                      />
+                    );
+                  } else {
+                    return (
+                      <WebView
+                        key={`sb-wv-${playgroundRevision}`}
+                        originWhitelist={['*']}
+                        source={useLocalPreview
+                          ? { html: compiledSandboxHtml }
+                          : { uri: `${backendUrl}/projects/${playgroundProjectId}/preview/index.html?token=${token}&session_id=${currentSessionId || ''}` }
+                        }
+                        style={styles.webView}
+                        javaScriptEnabled={true}
+                        domStorageEnabled={true}
+                        backgroundColor="#0d0d0d"
+                      />
+                    );
+                  }
+                })()}
+
               </View>
             ) : viewMode === 'explorer' ? (
               <ScrollView 

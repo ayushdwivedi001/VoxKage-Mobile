@@ -60,6 +60,38 @@ app = FastAPI(title="VoxKage Mobile API", version="2026.06.17")
 # Mount static files to serve generated documents
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
 
+def cleanup_orphaned_workspaces():
+    project_dir_base = "projects"
+    if not os.path.exists(project_dir_base):
+        return
+    try:
+        from database import get_db
+        db = get_db()
+        # Fetch all project IDs from DB
+        res = db.table("projects").select("id").execute()
+        db_project_ids = {p["id"] for p in res.data} if res.data else set()
+        
+        # List local directories
+        for entry in os.listdir(project_dir_base):
+            entry_path = os.path.join(project_dir_base, entry)
+            if os.path.isdir(entry_path):
+                # If the folder name is not a valid project ID in DB, delete it
+                if entry not in db_project_ids:
+                    import shutil
+                    try:
+                        shutil.rmtree(entry_path)
+                        print(f"[+] Cleaned up orphaned workspace directory: {entry}")
+                    except Exception as e:
+                        print(f"[-] Failed to delete orphaned workspace {entry}: {e}")
+    except Exception as e:
+        print(f"[-] Error during orphaned workspace cleanup: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    # Run self-healing cleanup on start to free up local disk space/memory
+    cleanup_orphaned_workspaces()
+
+
 @app.get("/", response_class=HTMLResponse)
 def get_root():
     html_content = """
@@ -355,7 +387,20 @@ def get_single_project(project_id: str, user: str = Depends(get_current_user)):
 
 @app.delete("/projects/{project_id}")
 def delete_single_project(project_id: str, user: str = Depends(get_current_user)):
-    return delete_playground_project(project_id, user)
+    res = delete_playground_project(project_id, user)
+    
+    # Delete local workspace files if they exist on the backend disk to free up memory/storage
+    project_dir = os.path.join("projects", str(project_id))
+    if os.path.exists(project_dir):
+        import shutil
+        try:
+            shutil.rmtree(project_dir)
+            print(f"[+] Cleaned up project workspace directory on deletion: {project_id}")
+        except Exception as e:
+            print(f"[-] Failed to delete workspace directory on deletion for {project_id}: {e}")
+            
+    return res
+
 
 # --- User Settings (Favorite Models) ---
 
