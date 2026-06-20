@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, View, Text, TouchableOpacity, ActivityIndicator, Clipboard, Animated } from 'react-native';
+import { FlatList, View, Text, TouchableOpacity, ActivityIndicator, Clipboard, Animated, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { LogoV } from './LogoV';
@@ -37,10 +37,40 @@ interface ChatFeedProps {
   confirmationToolName?: string | null;
   confirmationToolLabel?: string | null;
   onSendConfirmationResponse?: (confirm: boolean, alwaysAllow: boolean) => void;
+  onOpenSourcesDrawer?: (sources: { title: string; url: string; domain: string }[]) => void;
 }
 
 const hasCodeBlocks = (text: string) => {
   return /```html\n|```css\n|```javascript\n|```js\n/i.test(text);
+};
+
+const parseSources = (content: string) => {
+  const sourcesRegex = /<Sources\s+data="([^"]+)"\s*\/>/i;
+  const match = content?.match(sourcesRegex);
+  let cleanContent = content ? content.replace(/<Sources[\s\S]*/i, '').trim() : '';
+  let sources: { title: string; url: string; domain: string }[] = [];
+
+  if (match) {
+    const rawData = match[1];
+    const pairs = rawData.split('||');
+    pairs.forEach((p) => {
+      const parts = p.split('|');
+      if (parts.length >= 2) {
+        const title = parts[0];
+        const url = parts[1];
+        let domain = '';
+        try {
+          const matchDomain = url.match(/^(?:https?:\/\/)?(?:www\.)?([^\/]+)/i);
+          domain = matchDomain ? matchDomain[1] : url;
+        } catch {
+          domain = url;
+        }
+        sources.push({ title, url, domain });
+      }
+    });
+  }
+
+  return { cleanContent, sources };
 };
 
 export const ChatFeed: React.FC<ChatFeedProps> = ({
@@ -59,6 +89,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   confirmationToolName,
   confirmationToolLabel,
   onSendConfirmationResponse,
+  onOpenSourcesDrawer,
 }) => {
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [speakingId, setSpeakingId] = React.useState<string | null>(null);
@@ -171,7 +202,9 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             const isActiveResponse = item.id === 'active_response';
             const isThinkingMsg = isActiveResponse && item.isThinking;
             const hasProject = !!messageProjectIds[item.id];
-            const hasBlocks = hasCodeBlocks(item.content);
+            
+            const { cleanContent, sources } = parseSources(item.content);
+            const hasBlocks = hasCodeBlocks(cleanContent);
 
             const showThinkingHeader = isActiveResponse && (thinkingLogs.length > 0 || !!thinkingStatus);
             const showWorkflow = isActiveResponse && workflowNodes.length > 0;
@@ -244,9 +277,9 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   )}
 
                   {/* Main Bubble Content (Markdown Text) */}
-                  {(!isThinkingMsg || !!item.content) && (
+                  {(!isThinkingMsg || !!cleanContent) && (
                     <View style={[styles.assistantBubble, (hasBlocks || hasProject) && { minWidth: 160 }]}>
-                      <MarkdownRenderer text={item.content} onDrillAnswer={onDrillAnswer} />
+                      <MarkdownRenderer text={cleanContent} onDrillAnswer={onDrillAnswer} />
                       {item.id === 'streaming' && (
                         <View style={styles.typingIndicatorContainer}>
                           <ActivityIndicator size="small" color="#2563eb" />
@@ -255,7 +288,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                       {(hasBlocks || hasProject) && (
                         <TouchableOpacity
                           style={styles.openPlaygroundBubbleBtn}
-                          onPress={() => handleOpenCodeInPlayground(item.content, item.id)}
+                          onPress={() => handleOpenCodeInPlayground(cleanContent, item.id)}
                         >
                           <Ionicons name="play-circle-outline" size={14} color="#60a5fa" />
                           <Text style={styles.openPlaygroundBubbleBtnText}>Open in Playground</Text>
@@ -267,35 +300,64 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   {/* Actions Row */}
                   {item.id !== 'active_response' && item.id !== 'thinking' && (
                     <View style={styles.assistantActionsRow}>
-                      <TouchableOpacity 
-                        onPress={() => handleSpeak(item.content, item.id)} 
-                        style={styles.assistantActionBtn}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons 
-                          name={speakingId === item.id ? "volume-mute-outline" : "volume-medium-outline"} 
-                          size={13} 
-                          color={speakingId === item.id ? "#ef4444" : "#94a3b8"} 
-                        />
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        onPress={() => handleCopy(item.content, item.id)} 
-                        style={styles.assistantActionBtn}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons 
-                          name={copiedId === item.id ? "checkmark-sharp" : "copy-outline"} 
-                          size={13} 
-                          color={copiedId === item.id ? "#10b981" : "#94a3b8"} 
-                        />
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        onPress={() => onRetry?.(item, index)} 
-                        style={styles.assistantActionBtn}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons name="reload-outline" size={13} color="#94a3b8" />
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                        <TouchableOpacity 
+                          onPress={() => handleSpeak(cleanContent, item.id)} 
+                          style={styles.assistantActionBtn}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons 
+                            name={speakingId === item.id ? "volume-mute-outline" : "volume-medium-outline"} 
+                            size={13} 
+                            color={speakingId === item.id ? "#ef4444" : "#94a3b8"} 
+                          />
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          onPress={() => handleCopy(cleanContent, item.id)} 
+                          style={styles.assistantActionBtn}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons 
+                            name={copiedId === item.id ? "checkmark-sharp" : "copy-outline"} 
+                            size={13} 
+                            color={copiedId === item.id ? "#10b981" : "#94a3b8"} 
+                          />
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          onPress={() => onRetry?.(item, index)} 
+                          style={styles.assistantActionBtn}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="reload-outline" size={13} color="#94a3b8" />
+                        </TouchableOpacity>
+                      </View>
+
+                      {sources.length > 0 && (
+                        <TouchableOpacity
+                          style={styles.sourcesMiniRow}
+                          onPress={() => onOpenSourcesDrawer?.(sources)}
+                          activeOpacity={0.7}
+                        >
+                          {sources.slice(0, 3).map((src, srcIdx) => {
+                            const faviconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${src.domain}`;
+                            return (
+                              <Image
+                                key={srcIdx}
+                                source={{ uri: faviconUrl }}
+                                style={[
+                                  styles.sourceMiniFavicon,
+                                  srcIdx > 0 && { marginLeft: -8 }
+                                ]}
+                              />
+                            );
+                          })}
+                          {sources.length > 3 && (
+                            <View style={[styles.sourceMiniFavicon, styles.sourceMiniMoreBadge, { marginLeft: -8 }]}>
+                              <Text style={styles.sourceMiniMoreText}>+{sources.length - 3}</Text>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 </View>

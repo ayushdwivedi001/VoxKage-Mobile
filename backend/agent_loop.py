@@ -1480,6 +1480,8 @@ async def _run_agentic_loop_impl(
     active_project = active_project_box[0] if active_project_box else None
     active_project_id = active_project.get("id") if active_project else None
     api_key = os.getenv("OPENCODE_API_KEY")
+    consulted_sources = []
+    web_search_called = False
     if not api_key:
         yield json.dumps({"type": "error", "content": "OPENCODE_API_KEY not configured on backend."})
         return
@@ -1531,8 +1533,8 @@ async def _run_agentic_loop_impl(
         "- RAG FILE STORAGE & PERSISTENCE MANAGEMENT:\n"
         "  - The user has a permanent RAG document store in Supabase pgvector where files they upload are parsed and indexed.\n"
         "  - You have the 'list_indexed_documents' tool. You can use it to scan the database directly to list all permanently indexed files/documents, their unique IDs, and chunk counts. When asked about what documents are saved, or how many exist, ALWAYS call this tool first, sir.\n"
-        "  - You have the 'delete_indexed_document' tool. You can use it to delete RAG document vectors (by document_id or filename) to free up memory or clean up old files.\n"
-        "  - To update an existing document, first delete it using 'delete_indexed_document', and then instruct the user to upload the new version.\n\n"
+        "  - You have the 'delete_indexed_document' tool. You can use it to delete RAG document vectors (by document_id or filename) to free up memory or clean up old files.\n\n"
+        "- MANDATORY REAL-TIME SEARCH RULE: Whenever the user asks about current events, sports scores, live match statistics (such as World Cup standings or goals), current dates/times, or real-time facts, you MUST call your web search/fetch tools (web_search, web_search_deep, web_search_parallel, web_fetch, web_fetch_parallel, browse_and_extract_tool) instead of guessing, assuming, or hallucinating results from your pre-trained memory. This is non-negotiable, sir. Calling these tools guarantees that the search sources will be compiled and printed under your response.\n\n"
         "PRIME DIRECTIVE: CALL TOOLS directly when asked to execute tasks. Do not print raw JSON.\n"
         "Never say you cannot perform an action — if it requires laptop interaction (volume, apps, files, git, terminal), "
         "always call the 'laptop_command' tool. If it requires web searching, call the 'web_search' or 'web_search_deep' tools.\n"
@@ -1719,6 +1721,7 @@ async def _run_agentic_loop_impl(
             })
 
             async def execute_tool_call(tc):
+                nonlocal web_search_called
                 try:
                     name = tc["function"]["name"]
                     args_str = tc["function"]["arguments"]
@@ -1726,6 +1729,42 @@ async def _run_agentic_loop_impl(
                         args = json.loads(args_str or "{}")
                     except:
                         args = {}
+
+                    if name in {"web_search", "web_fetch", "web_search_parallel", "web_fetch_parallel", "web_search_deep", "browse_and_extract_tool"}:
+                        web_search_called = True
+                        import urllib.parse
+                        if name == "web_search" or name == "web_search_deep":
+                            q = args.get("query", "")
+                            if q:
+                                consulted_sources.append({
+                                    "title": f"DuckDuckGo Search: {q}",
+                                    "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
+                                })
+                        elif name == "web_fetch":
+                            u = args.get("url", "")
+                            if u:
+                                consulted_sources.append({"title": u, "url": u})
+                        elif name == "web_search_parallel":
+                            for q in args.get("queries", []):
+                                if q:
+                                    consulted_sources.append({
+                                        "title": f"DuckDuckGo Search: {q}",
+                                        "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
+                                    })
+                        elif name == "web_fetch_parallel":
+                            for u in args.get("urls", []):
+                                if u:
+                                    consulted_sources.append({"title": u, "url": u})
+                        elif name == "browse_and_extract_tool":
+                            u = args.get("url", "")
+                            q = args.get("query", "")
+                            if u:
+                                consulted_sources.append({"title": u, "url": u})
+                            elif q:
+                                consulted_sources.append({
+                                    "title": f"DuckDuckGo Search: {q}",
+                                    "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
+                                })
 
                     tc_id = tc["id"]
                     tool_label = get_tool_label(name, args)
@@ -1910,26 +1949,46 @@ async def _run_agentic_loop_impl(
                             if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Searching the web for: {q}"}))
                             search_res = await web_search(q)
                             tool_output = json.dumps(search_res)
+                            if isinstance(search_res, list):
+                                for r in search_res:
+                                    if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                        consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
                         elif name == "web_fetch":
                             u = args.get("url", "")
                             if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching URL content: {u}"}))
                             fetch_res = await web_fetch(u)
                             tool_output = json.dumps(fetch_res)
+                            if isinstance(fetch_res, dict) and fetch_res.get("url") and "error" not in fetch_res:
+                                consulted_sources.append({"title": fetch_res.get("url"), "url": fetch_res.get("url")})
                         elif name == "web_search_parallel":
                             queries = args.get("queries", [])
                             if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Searching multiple queries in parallel..."}))
                             search_res = await web_search_parallel(queries)
                             tool_output = json.dumps(search_res)
+                            if isinstance(search_res, list):
+                                for sub_list in search_res:
+                                    if isinstance(sub_list, list):
+                                        for r in sub_list:
+                                            if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                                consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
                         elif name == "web_fetch_parallel":
                             urls = args.get("urls", [])
                             if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching multiple URLs in parallel..."}))
                             fetch_res = await web_fetch_parallel(urls)
                             tool_output = json.dumps(fetch_res)
+                            if isinstance(fetch_res, list):
+                                for r in fetch_res:
+                                    if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                        consulted_sources.append({"title": r.get("url"), "url": r.get("url")})
                         elif name == "web_search_deep":
                             q = args.get("query", "")
                             if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Performing deep web search for: {q}"}))
                             deep_res = await web_search_deep(q)
                             tool_output = json.dumps(deep_res)
+                            if isinstance(deep_res, list):
+                                for r in deep_res:
+                                    if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                        consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
                         elif name == "browse_and_extract_tool":
                             u = args.get("url", "")
                             q = args.get("query", "")
@@ -1937,10 +1996,16 @@ async def _run_agentic_loop_impl(
                                 if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching URL: {u}"}))
                                 fetch_res = await web_fetch(u)
                                 tool_output = fetch_res.get("content", fetch_res.get("error", "No text content."))
+                                if isinstance(fetch_res, dict) and fetch_res.get("url") and "error" not in fetch_res:
+                                    consulted_sources.append({"title": fetch_res.get("url"), "url": fetch_res.get("url")})
                             else:
                                 if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Searching: {q}"}))
                                 search_res = await web_search(q)
                                 tool_output = json.dumps(search_res)
+                                if isinstance(search_res, list):
+                                    for r in search_res:
+                                        if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                            consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
 
                         elif name == "compact_chat_history":
                             if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": "Compacting chat history..."}))
@@ -2484,7 +2549,21 @@ async def _run_agentic_loop_impl(
                     "tool_call_id": tc_id,
                     "content": tool_output
                 })
-
         except Exception as e:
             yield json.dumps({"type": "error", "content": f"Agent loop failed: {str(e)}"})
             return
+
+    # Format and append consulted sources if any web search tool was called
+    if web_search_called or consulted_sources:
+        if not consulted_sources:
+            consulted_sources.append({"title": "Google Search", "url": "https://www.google.com"})
+        seen_urls = set()
+        unique_sources = []
+        for s in consulted_sources:
+            if s["url"] not in seen_urls:
+                seen_urls.add(s["url"])
+                unique_sources.append(s)
+        if unique_sources:
+            sources_str = "||".join([f"{s['title'].replace('|', '-').replace('<', '').replace('>', '')}|{s['url']}" for s in unique_sources])
+            sources_tag = f'\n\n<Sources data="{sources_str}" />'
+            yield json.dumps({"type": "token", "content": sources_tag})

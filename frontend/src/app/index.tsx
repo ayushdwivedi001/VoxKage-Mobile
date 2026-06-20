@@ -12,6 +12,8 @@ import {
   LogBox,
   StyleSheet,
   Modal,
+  Linking,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -228,6 +230,10 @@ export default function ChatScreen() {
   const [confirmationToolName, setConfirmationToolName] = useState<string | null>(null);
   const [confirmationToolLabel, setConfirmationToolLabel] = useState<string | null>(null);
   const [confirmationRequestId, setConfirmationRequestId] = useState<string | null>(null);
+
+  // Sources Bottom Sheet State
+  const [isSourcesDrawerOpen, setIsSourcesDrawerOpen] = useState(false);
+  const [activeSources, setActiveSources] = useState<{ title: string; url: string; domain: string }[]>([]);
 
   const [sidebarAnim] = useState(() => new Animated.Value(-280));
   const [playgroundAnim] = useState(() => new Animated.Value(drawerWidth));
@@ -2144,6 +2150,10 @@ window.onresize = updateSize;
             confirmationToolName={confirmationToolName}
             confirmationToolLabel={confirmationToolLabel}
             onSendConfirmationResponse={sendConfirmationResponse}
+            onOpenSourcesDrawer={(sources) => {
+              setActiveSources(sources);
+              setIsSourcesDrawerOpen(true);
+            }}
           />
         )}
 
@@ -2406,6 +2416,67 @@ window.onresize = updateSize;
                   <Text style={styles.thinkingLogTime}>{time}</Text>
                   <Text style={styles.thinkingLogText}>{content}</Text>
                 </View>
+              );
+            }}
+          />
+        </View>
+      </Modal>
+
+      {/* Sources Bottom Sheet Drawer */}
+      <Modal
+        visible={isSourcesDrawerOpen}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsSourcesDrawerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
+          onPress={() => setIsSourcesDrawerOpen(false)}
+        />
+        <View style={styles.sourcesBottomSheet}>
+          <View style={styles.sourcesBottomSheetHeader}>
+            <View style={styles.sourcesBottomSheetTitleRow}>
+              <Ionicons name="globe-outline" size={16} color="#60a5fa" />
+              <Text style={styles.sourcesBottomSheetTitle}>Consulted Sources</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setIsSourcesDrawerOpen(false)}
+              style={styles.sourcesBottomSheetClose}
+            >
+              <Ionicons name="close" size={14} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={activeSources}
+            keyExtractor={(item, idx) => `source-${idx}`}
+            showsVerticalScrollIndicator={false}
+            style={styles.sourcesList}
+            renderItem={({ item }) => {
+              const faviconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${item.domain}`;
+              return (
+                <TouchableOpacity
+                  style={styles.sourceListItem}
+                  onPress={() => {
+                    if (item.url) {
+                      Linking.openURL(item.url).catch(err => {
+                        Alert.alert("Error, Sir", "Could not open this URL.");
+                      });
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Image source={{ uri: faviconUrl }} style={styles.sourceListItemFavicon} />
+                  <View style={styles.sourceListItemContent}>
+                    <Text style={styles.sourceListItemTitle} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.sourceListItemDomain} numberOfLines={1}>
+                      {item.domain}
+                    </Text>
+                  </View>
+                  <Ionicons name="arrow-forward" size={16} color="#64748b" />
+                </TouchableOpacity>
               );
             }}
           />
