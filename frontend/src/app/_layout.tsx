@@ -1,37 +1,41 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, Platform } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function RootLayout() {
   // If previewing in Web, wrap in a gorgeous centered phone frame to look like a mobile app
   if (Platform.OS === 'web') {
     return (
-      <View style={styles.webContainer}>
-        <StatusBar style="light" />
-        <View style={styles.phoneFrame}>
-          <View style={[styles.statusBarMock, { pointerEvents: 'none' as any }]}>
-            <View style={styles.notchMock} />
+      <SafeAreaProvider>
+        <View style={styles.webContainer}>
+          <StatusBar style="light" />
+          <View style={styles.phoneFrame}>
+            <View style={[styles.statusBarMock, { pointerEvents: 'none' as any }]}>
+              <View style={styles.notchMock} />
+            </View>
+            <View style={styles.screenContent}>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="login" />
+              </Stack>
+            </View>
+            <View style={[styles.homeIndicatorMock, { pointerEvents: 'none' as any }]} />
           </View>
-          <View style={styles.screenContent}>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="login" />
-            </Stack>
-          </View>
-          <View style={[styles.homeIndicatorMock, { pointerEvents: 'none' as any }]} />
         </View>
-      </View>
+      </SafeAreaProvider>
     );
   }
 
+  // Native mobile: edge-to-edge rendering with transparent status/nav bars
   return (
-    <>
-      <StatusBar style="light" />
+    <SafeAreaProvider>
+      <StatusBar style="light" translucent backgroundColor="transparent" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />
       </Stack>
-    </>
+    </SafeAreaProvider>
   );
 }
 

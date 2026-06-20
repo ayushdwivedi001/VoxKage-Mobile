@@ -10,15 +10,21 @@ import {
   Alert,
   FlatList,
   LogBox,
+  StyleSheet,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-LogBox.ignoreLogs(['Cannot record touch end without a touch start']);
+LogBox.ignoreLogs([
+  'Cannot record touch end without a touch start',
+  'Cannot connect to Expo CLI',
+]);
 
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { WebView } from 'react-native-webview';
+import { LinearGradient } from 'expo-linear-gradient';
 import { storage } from '@/utils/storage';
 
 // Import refactored components & styles
@@ -42,6 +48,7 @@ const COMMANDS = [
 ];
 
 export default function ChatScreen() {
+  const insets = useSafeAreaInsets();
   const [token, setToken] = useState<string | null>(null);
   const [backendUrl, setBackendUrl] = useState('');
   const [email, setEmail] = useState<string | null>(null);
@@ -292,11 +299,11 @@ export default function ChatScreen() {
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #03060f; overflow: hidden; width: 100vw; height: 100vh; }
-  canvas { display: block; width: 100vw; height: 100vh; filter: blur(4px); }
+  html, body { background: #020409; overflow: hidden; width: 100%; height: 100%; -webkit-overflow-scrolling: touch; }
+  canvas { display: block; width: 100%; height: 100%; filter: blur(4px); }
 </style>
 </head>
 <body>
@@ -304,8 +311,8 @@ export default function ChatScreen() {
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-let w = canvas.width = window.innerWidth;
-let h = canvas.height = window.innerHeight;
+let w = canvas.width = document.documentElement.clientWidth || window.innerWidth || 360;
+let h = canvas.height = document.documentElement.clientHeight || window.innerHeight || 640;
 let t = 0;
 
 // Create an offscreen noise pattern to achieve an organic paper/film grain texture
@@ -326,6 +333,12 @@ nCtx.putImageData(nData, 0, 0);
 const noisePattern = ctx.createPattern(noiseCanvas, 'repeat');
 
 function draw() {
+  const currentW = window.innerWidth || document.documentElement.clientWidth || 360;
+  const currentH = window.innerHeight || document.documentElement.clientHeight || 640;
+  if (w !== currentW || h !== currentH) {
+    w = canvas.width = currentW;
+    h = canvas.height = currentH;
+  }
   ctx.fillStyle = '#020409';
   ctx.fillRect(0, 0, w, h);
 
@@ -390,10 +403,10 @@ function draw() {
 }
 draw();
 window.onresize = () => {
-  w = canvas.width = window.innerWidth;
-  h = canvas.height = window.innerHeight;
+  w = canvas.width = window.innerWidth || document.documentElement.clientWidth || 360;
+  h = canvas.height = window.innerHeight || document.documentElement.clientHeight || 640;
 };
-<\/script>
+</script>
 </body>
 </html>
   `;
@@ -1825,12 +1838,25 @@ window.onresize = () => {
           title="Fluid Background Shader"
         />
       ) : (
-        <WebView
-          source={{ html: fluidBackgroundHTML }}
-          style={[styles.fluidBackground, { pointerEvents: 'none' as any }]}
-          scrollEnabled={false}
-          javaScriptEnabled={true}
-        />
+        <View style={[StyleSheet.absoluteFill, { zIndex: 0 }]}>
+          <WebView
+            source={{ html: fluidBackgroundHTML }}
+            originWhitelist={['*']}
+            style={{ flex: 1, backgroundColor: '#020409' }}
+            scrollEnabled={false}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            androidLayerType="hardware"
+            allowsInlineMediaPlayback={true}
+            startInLoadingState={false}
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            overScrollMode="never"
+            setBuiltInZoomControls={false}
+            setDisplayZoomControls={false}
+            bounces={false}
+          />
+        </View>
       )}
 
       {/* Border Lit Up Entrance Animation Overlay */}
@@ -1846,7 +1872,13 @@ window.onresize = () => {
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.mainWrapper}
+        style={[
+          styles.mainWrapper,
+          Platform.OS !== 'web' && {
+            paddingTop: insets.top,
+            paddingBottom: insets.bottom,
+          },
+        ]}
       >
         {/* Navigation Bar */}
         <View style={styles.navBar}>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { styles } from './styles';
 
@@ -66,6 +67,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
   const [viewMode, setViewMode] = React.useState<'sandbox' | 'explorer' | 'fileviewer'>('sandbox');
   const [selectedFile, setSelectedFile] = React.useState<string | null>(null);
   const [selectedFileContent, setSelectedFileContent] = React.useState<string>('');
+  const insets = useSafeAreaInsets();
 
   // Reset view mode when project changes or drawer opens/closes
   React.useEffect(() => {
@@ -88,7 +90,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
           style={styles.drawerBackdrop}
         />
       )}
-      <Animated.View style={[styles.playgroundDrawer, { left: playgroundAnim }]}>
+      <Animated.View style={[styles.playgroundDrawer, { left: playgroundAnim }, Platform.OS !== 'web' && { paddingTop: insets.top }]}>
         {/* Playground Header */}
         <View style={styles.playgroundHeader}>
           <TouchableOpacity 

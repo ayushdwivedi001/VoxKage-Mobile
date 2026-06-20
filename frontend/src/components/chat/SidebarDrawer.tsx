@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LogoV } from './LogoV';
 import { styles } from './styles';
 
@@ -52,6 +53,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onPlaygroundPress,
 }) => {
   const [searchQuery, setSearchQuery] = React.useState('');
+  const insets = useSafeAreaInsets();
 
   const filteredSessions = sessions.filter(s =>
     s.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -66,7 +68,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
           style={styles.drawerBackdrop}
         />
       )}
-      <Animated.View style={[styles.sidebarDrawer, { left: sidebarAnim }]}>
+      <Animated.View style={[styles.sidebarDrawer, { left: sidebarAnim }, Platform.OS !== 'web' && { paddingTop: insets.top }]}>
         <View style={styles.sidebarHeader}>
           <LogoV size={24} />
           <Text style={styles.sidebarTitle}>VoxKage</Text>

@@ -363,9 +363,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               setInputHeight(h);
             }
           }}
-        >
-          {renderHighlightedText(inputText)}
-        </TextInput>
+        />
 
         <TouchableOpacity onPress={handleVoicePress} style={styles.inputVoiceBtn}>
           <Ionicons

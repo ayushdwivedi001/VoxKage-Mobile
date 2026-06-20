@@ -6,7 +6,7 @@ export const drawerWidth = Platform.OS === 'web' ? 366 : screenWidth;
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050a18',
+    backgroundColor: '#020409',
   },
   fluidBackground: {
     position: 'absolute',
@@ -38,7 +38,8 @@ export const styles = StyleSheet.create({
   },
   mainWrapper: {
     flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 44 : (Platform.OS === 'web' ? 40 : 20),
+    paddingTop: Platform.OS === 'web' ? 40 : 0,
+    zIndex: 1,
   },
   navBar: {
     flexDirection: 'row',
@@ -334,7 +335,7 @@ export const styles = StyleSheet.create({
     backgroundColor: '#171717',
     borderRightWidth: 1,
     borderRightColor: '#262626',
-    paddingTop: Platform.OS === 'ios' ? 44 : (Platform.OS === 'web' ? 40 : 20),
+    paddingTop: Platform.OS === 'web' ? 40 : 0,
     zIndex: 101,
   },
   sidebarHeader: {
@@ -444,8 +445,8 @@ export const styles = StyleSheet.create({
   },
   sessionTextWrapper: {
     flex: 1,
-    height: '100%',
     justifyContent: 'center',
+    paddingVertical: 4,
   },
   sessionText: {
     color: '#9ca3af',
@@ -551,7 +552,7 @@ export const styles = StyleSheet.create({
     backgroundColor: '#08111f',
     borderLeftWidth: 1,
     borderLeftColor: '#111827',
-    paddingTop: Platform.OS === 'ios' ? 44 : (Platform.OS === 'web' ? 40 : 20),
+    paddingTop: Platform.OS === 'web' ? 40 : 0,
     zIndex: 101,
   },
   playgroundHeader: {
