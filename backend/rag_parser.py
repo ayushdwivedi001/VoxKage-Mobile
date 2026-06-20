@@ -1,5 +1,7 @@
 import os
 import re
+import base64
+import httpx
 from fastapi import HTTPException
 
 def extract_text(file_path: str) -> str:
@@ -114,3 +116,72 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list:
         start += (chunk_size - overlap)
         
     return chunks
+
+async def extract_text_from_image(file_path: str) -> str:
+    api_key = os.getenv("OPENCODE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENCODE_API_KEY not configured on backend.")
+        
+    _, ext = os.path.splitext(file_path.lower())
+    mime_type = "image/png"
+    if ext in (".jpg", ".jpeg"):
+        mime_type = "image/jpeg"
+    elif ext == ".webp":
+        mime_type = "image/webp"
+        
+    try:
+        with open(file_path, "rb") as f:
+            img_bytes = f.read()
+        img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+        image_url = f"data:{mime_type};base64,{img_base64}"
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read image file: {str(e)}")
+        
+    payload = {
+        "model": "gemini-2.5-flash",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text", 
+                        "text": "Extract all text, transcribing every detail, table, chart, and providing a thorough description of this image for vector search RAG database indexing, Sir."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_url
+                        }
+                    }
+                ]
+            }
+        ],
+        "temperature": 0.3
+    }
+    
+    url = "https://opencode.ai/zen/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code == 200:
+                res_data = response.json()
+                description = res_data["choices"][0]["message"]["content"]
+                return f"[Image OCR & Description: {os.path.basename(file_path)}]\n{description}"
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"OpenCode vision API returned an error: {response.text}"
+                )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse image using vision model: {str(e)}")
+
+async def extract_text_async(file_path: str) -> str:
+    _, ext = os.path.splitext(file_path.lower())
+    if ext in (".png", ".jpg", ".jpeg", ".webp"):
+        return await extract_text_from_image(file_path)
+    return extract_text(file_path)

@@ -64,6 +64,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       ref={flatListRef}
       data={data}
       keyExtractor={(item) => item.id}
+      style={{ flex: 1 }}
       contentContainerStyle={styles.chatListContent}
       showsVerticalScrollIndicator={false}
       renderItem={({ item }) => {

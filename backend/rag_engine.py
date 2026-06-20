@@ -2,7 +2,7 @@ import os
 import re
 from fastapi import HTTPException
 from database import get_db
-from rag_parser import extract_text, chunk_text
+from rag_parser import chunk_text, extract_text_async
 
 # Cache the model to avoid loading it on every import
 _model = None
@@ -21,11 +21,11 @@ def get_embedding_model():
             )
     return _model
 
-def index_file_in_rag(file_path: str, filename: str, user_id: str, document_id: str = None) -> dict:
+async def index_file_in_rag(file_path: str, filename: str, user_id: str, document_id: str = None) -> dict:
     """
     Extracts text, chunks it, generates vector embeddings, and pushes it to Supabase pgvector table.
     """
-    text = extract_text(file_path)
+    text = await extract_text_async(file_path)
     chunks = chunk_text(text)
     
     if not chunks:

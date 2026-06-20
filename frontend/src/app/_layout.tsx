@@ -1,6 +1,5 @@
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Platform } from 'react-native';
+import { StyleSheet, View, Platform, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function RootLayout() {
@@ -9,7 +8,7 @@ export default function RootLayout() {
     return (
       <SafeAreaProvider>
         <View style={styles.webContainer}>
-          <StatusBar style="light" />
+          <StatusBar barStyle="light-content" />
           <View style={styles.phoneFrame}>
             <View style={[styles.statusBarMock, { pointerEvents: 'none' as any }]}>
               <View style={styles.notchMock} />
@@ -30,7 +29,7 @@ export default function RootLayout() {
   // Native mobile: edge-to-edge rendering with transparent status/nav bars
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" translucent backgroundColor="transparent" />
+      <StatusBar barStyle="light-content" translucent={true} backgroundColor="transparent" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />

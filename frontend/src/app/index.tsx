@@ -41,6 +41,72 @@ const generateRandomId = (prefix: string = 'rand'): string => {
   return `${prefix}-${Math.floor(Math.random() * 10000000)}`;
 };
 
+const performUpload = async (
+  url: string,
+  uri: string,
+  name: string,
+  mimeType: string,
+  token: string
+): Promise<any> => {
+  if (Platform.OS === 'web') {
+    const blobRes = await fetch(uri);
+    const blob = await blobRes.blob();
+    const formData = new FormData();
+    formData.append('file', blob, name);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || `Upload failed with status ${response.status}`);
+    }
+    return response.json();
+  } else {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('Accept', 'application/json');
+      
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch (e) {
+            resolve({ status: 'success', raw: xhr.responseText });
+          }
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText);
+            reject(new Error(err.detail || `Upload failed with status ${xhr.status}, Sir.`));
+          } catch (e) {
+            reject(new Error(`Upload failed with status ${xhr.status}, Sir.`));
+          }
+        }
+      };
+      
+      xhr.onerror = () => {
+        reject(new Error('Network request failed, Sir.'));
+      };
+      
+      const formData = new FormData();
+      formData.append('file', {
+        uri: uri,
+        name: name,
+        type: mimeType,
+      } as any);
+      
+      xhr.send(formData);
+    });
+  }
+};
+
 const COMMANDS = [
   { name: '/compact', desc: 'Compress active chat history.' },
   { name: '/btw', desc: 'Ask a quick stateless side-question.' },
@@ -92,7 +158,7 @@ export default function ChatScreen() {
   const [uploadingFile, setUploadingFile] = useState(false);
   
   // Staged Attachment & Media States
-  const [stagedAttachment, setStagedAttachment] = useState<{ uri: string; name: string; type: 'image' | 'document'; size: number; base64?: string } | null>(null);
+  const [stagedAttachment, setStagedAttachment] = useState<{ uri: string; name: string; type: 'image' | 'document'; size: number; base64?: string; mimeType?: string } | null>(null);
   const [showMediaPopover, setShowMediaPopover] = useState(false);
 
   // Playground Code Sandbox State
@@ -302,8 +368,8 @@ export default function ChatScreen() {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { background: #020409; overflow: hidden; width: 100%; height: 100%; -webkit-overflow-scrolling: touch; }
-  canvas { display: block; width: 100%; height: 100%; filter: blur(4px); }
+  html, body { background: #000000; overflow: hidden; width: 100%; height: 100%; -webkit-overflow-scrolling: touch; }
+  canvas { display: block; width: 100%; height: 100%; }
 </style>
 </head>
 <body>
@@ -311,8 +377,30 @@ export default function ChatScreen() {
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-let w = canvas.width = document.documentElement.clientWidth || window.innerWidth || 360;
-let h = canvas.height = document.documentElement.clientHeight || window.innerHeight || 640;
+
+// Lock canvas dimensions to maximum screen dimensions to prevent keyboard resizing jumps
+let w = canvas.width = window.screen.width || window.innerWidth || 360;
+let h = canvas.height = window.screen.height || window.innerHeight || 640;
+let maxW = w;
+let maxH = h;
+
+function updateSize() {
+  const currentW = window.innerWidth || document.documentElement.clientWidth || 360;
+  const currentH = window.innerHeight || document.documentElement.clientHeight || 640;
+  // If the viewport expands (e.g. rotation), update our max bounds. 
+  // We ignore shrinking (which is the keyboard pushing up) to keep the background static.
+  if (currentW > maxW) maxW = currentW;
+  if (currentH > maxH) maxH = currentH;
+  
+  if (canvas.width !== maxW || canvas.height !== maxH) {
+    canvas.width = maxW;
+    canvas.height = maxH;
+    w = maxW;
+    h = maxH;
+  }
+}
+updateSize();
+
 let t = 0;
 
 // Create an offscreen noise pattern to achieve an organic paper/film grain texture
@@ -327,85 +415,51 @@ for (let i = 0; i < d.length; i += 4) {
   d[i] = val;     // R
   d[i+1] = val;   // G
   d[i+2] = val;   // B
-  d[i+3] = 22;    // Alpha (grain opacity ~8.6%)
+  d[i+3] = 9;     // Alpha (grain opacity ~3.5%)
 }
 nCtx.putImageData(nData, 0, 0);
 const noisePattern = ctx.createPattern(noiseCanvas, 'repeat');
 
 function draw() {
-  const currentW = window.innerWidth || document.documentElement.clientWidth || 360;
-  const currentH = window.innerHeight || document.documentElement.clientHeight || 640;
-  if (w !== currentW || h !== currentH) {
-    w = canvas.width = currentW;
-    h = canvas.height = currentH;
-  }
-  ctx.fillStyle = '#020409';
+  updateSize();
+  
+  // Solid pure black base
+  ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, w, h);
 
-  const numRibbons = 15;
-  for (let i = 0; i < numRibbons; i++) {
-    const ratio = i / numRibbons;
-    const speed = 0.25 + ratio * 0.15;
-    const amp = 60 + ratio * 80;
-    const freq = 0.002 + ratio * 0.002;
-    
-    ctx.beginPath();
-    const steps = 40;
-    const pts = [];
-    for (let y = 0; y <= h; y += h / steps) {
-      const xOffset = Math.sin(y * freq + t * speed + ratio * Math.PI * 2) * amp;
-      // Widen the spread (1.4x screen width) so margins are fully covered
-      const xCenter = w * 0.5 + (ratio - 0.5) * (w * 1.4) + xOffset;
-      pts.push({ x: xCenter, y });
-    }
-    
-    // Substantially widen ribbons (180px - 460px width) for seamless blending
-    const ribbonWidth = 180 + ratio * 280;
-    ctx.moveTo(pts[0].x - ribbonWidth * 0.5, pts[0].y);
-    for (let j = 1; j < pts.length; j++) {
-      ctx.lineTo(pts[j].x - ribbonWidth * 0.5, pts[j].y);
-    }
-    for (let j = pts.length - 1; j >= 0; j--) {
-      ctx.lineTo(pts[j].x + ribbonWidth * 0.5, pts[j].y);
-    }
-    ctx.closePath();
-    
-    const grad = ctx.createLinearGradient(w * 0.5, 0, w * 0.5, h);
-    const alpha = 0.16 + Math.sin(t * 0.12 + ratio * 3) * 0.04;
-    
-    grad.addColorStop(0, 'rgba(2, 4, 15, 0)');
-    grad.addColorStop(0.18, 'rgba(5, 30, 95, ' + (alpha * 0.55) + ')');
-    grad.addColorStop(0.48, 'rgba(30, 135, 255, ' + (alpha * 0.95) + ')');
-    grad.addColorStop(0.68, 'rgba(255, 225, 215, ' + (alpha * 1.15) + ')');
-    grad.addColorStop(0.85, 'rgba(235, 45, 45, ' + (alpha * 1.45) + ')');
-    grad.addColorStop(1, 'rgba(120, 15, 15, ' + (alpha * 0.95) + ')');
-    
-    ctx.fillStyle = grad;
-    ctx.fill();
-  }
+  t += 0.0006; // extremely slow, premium gradient movement
 
-  // Draw the fine vertical ribbed lines texture overlay
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.012)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = 0; x < w; x += 3) {
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
-  }
-  ctx.stroke();
+  // Draw 2 massive glowing dark blue/indigo gradients anchored at the bottom
+  // Blob 1: Dark Indigo/Blue (bottom left-middle)
+  const b1x = w * 0.3 + Math.sin(t * 0.5) * w * 0.18;
+  const b1y = h * 1.05 + Math.cos(t * 0.3) * 20;
+  const b1r = h * 0.72 + Math.sin(t * 0.2) * 50;
+  const grad1 = ctx.createRadialGradient(b1x, b1y, 0, b1x, b1y, b1r);
+  grad1.addColorStop(0, 'rgba(29, 78, 216, 0.58)'); // rich vibrant royal blue
+  grad1.addColorStop(0.45, 'rgba(30, 58, 138, 0.22)');
+  grad1.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = grad1;
+  ctx.fillRect(0, 0, w, h);
+
+  // Blob 2: Deep Navy/Cobalt (bottom right-middle)
+  const b2x = w * 0.72 + Math.cos(t * 0.4) * w * 0.22;
+  const b2y = h * 1.02 + Math.sin(t * 0.6) * 20;
+  const b2r = h * 0.80 + Math.cos(t * 0.3) * 60;
+  const grad2 = ctx.createRadialGradient(b2x, b2y, 0, b2x, b2y, b2r);
+  grad2.addColorStop(0, 'rgba(37, 99, 235, 0.48)'); // cobalt blue glow
+  grad2.addColorStop(0.5, 'rgba(15, 23, 72, 0.16)');
+  grad2.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = grad2;
+  ctx.fillRect(0, 0, w, h);
 
   // Draw noise grain overlay
   ctx.fillStyle = noisePattern;
   ctx.fillRect(0, 0, w, h);
 
-  t += 0.004;
   requestAnimationFrame(draw);
 }
 draw();
-window.onresize = () => {
-  w = canvas.width = window.innerWidth || document.documentElement.clientWidth || 360;
-  h = canvas.height = window.innerHeight || document.documentElement.clientHeight || 640;
-};
+window.onresize = updateSize;
 </script>
 </body>
 </html>
@@ -1404,57 +1458,24 @@ window.onresize = () => {
 
     let uploadedDocId: string | null = null;
 
-    if (staged && staged.type === 'document') {
+    if (staged && (staged.type === 'document' || staged.type === 'image')) {
       setUploadingFile(true);
-      setThinkingStatus('Uploading and indexing document, Sir...');
+      setThinkingStatus(`Uploading and indexing ${staged.type}, Sir...`);
       
-      const formData = new FormData();
-      if (Platform.OS === 'web') {
-        try {
-          const blobRes = await fetch(staged.uri);
-          const blob = await blobRes.blob();
-          formData.append('file', blob, staged.name);
-        } catch (err: any) {
-          showAlert('File Error', `Failed to read file on web, Sir: ${err.message}`);
-          setUploadingFile(false);
-          return;
-        }
-      } else {
-        formData.append('file', {
-          uri: staged.uri,
-          name: staged.name,
-          type: 'application/octet-stream',
-        } as any);
-      }
-
       try {
-        const response = await fetch(`${backendUrl}/rag/upload`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
+        const uploadUrl = `${backendUrl}/rag/upload`;
+        const mimeType = staged.mimeType || (staged.type === 'image' ? 'image/jpeg' : 'application/octet-stream');
+        const uploadRes = await performUpload(uploadUrl, staged.uri, staged.name, mimeType, token || '');
+        uploadedDocId = uploadRes.document_id;
+        
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: generateRandomId('system'),
+            role: 'laptop',
+            content: `📄 Document indexed: ${staged.name}\nVector RAG version has been stored.`,
           },
-          body: formData,
-        });
-
-        if (response.ok) {
-          const uploadRes = await response.json();
-          uploadedDocId = uploadRes.document_id;
-          
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: generateRandomId('system'),
-              role: 'laptop',
-              content: `📄 Document indexed: ${staged.name}\nVector RAG version has been stored.`,
-            },
-          ]);
-        } else {
-          const errData = await response.json();
-          showAlert('Upload Failed', errData.detail || 'Failed to process document, Sir.');
-          setUploadingFile(false);
-          return;
-        }
+        ]);
       } catch (err: any) {
         showAlert('Upload Error', `Failed to upload document: ${err.message}`);
         setUploadingFile(false);
@@ -1499,7 +1520,7 @@ window.onresize = () => {
 
     const constructPayload = () => {
       return JSON.stringify({
-        message: userQuery,
+        message: displayMsg,
         model: activeModel,
         variant: VARIANTS[activeVariantIndex],
         client_time: clientTimeStr,
@@ -1511,7 +1532,7 @@ window.onresize = () => {
           js: activeProject.js
         } : null,
         document_id: uploadedDocId || undefined,
-        image: staged && staged.type === 'image' ? staged.base64 : undefined,
+        image: undefined,
       });
     };
 
@@ -1556,7 +1577,7 @@ window.onresize = () => {
       }
       
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as any,
         allowsEditing: true,
         quality: 0.8,
         base64: true,
@@ -1576,6 +1597,7 @@ window.onresize = () => {
           type: 'image',
           size: fileSize,
           base64: asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : undefined,
+          mimeType: asset.mimeType || 'image/jpeg',
         });
       }
     } catch (e: any) {
@@ -1592,7 +1614,7 @@ window.onresize = () => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as any,
         allowsEditing: true,
         quality: 0.8,
         base64: true,
@@ -1612,6 +1634,7 @@ window.onresize = () => {
           type: 'image',
           size: fileSize,
           base64: asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : undefined,
+          mimeType: asset.mimeType || 'image/jpeg',
         });
       }
     } catch (e: any) {
@@ -1640,6 +1663,7 @@ window.onresize = () => {
           name: asset.name,
           type: 'document',
           size: fileSize,
+          mimeType: asset.mimeType || undefined,
         });
       }
     } catch (e: any) {
@@ -1672,36 +1696,11 @@ window.onresize = () => {
       const fileAsset = pickerResult.assets[0];
       setUploadingFile(true);
 
-      const formData = new FormData();
-      if (Platform.OS === 'web') {
-        try {
-          const blobRes = await fetch(fileAsset.uri);
-          const blob = await blobRes.blob();
-          formData.append('file', blob, fileAsset.name);
-        } catch (err: any) {
-          showAlert('File Error', `Failed to read file on web, Sir: ${err.message}`);
-          setUploadingFile(false);
-          return;
-        }
-      } else {
-        formData.append('file', {
-          uri: fileAsset.uri,
-          name: fileAsset.name,
-          type: fileAsset.mimeType || 'application/octet-stream',
-      } as any);
-      }
-
-      const response = await fetch(`${backendUrl}/upload`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/json',
-        },
-        body: formData,
-      });
-
-      const data = await response.json();
-      if (response.ok) {
+      try {
+        const uploadUrl = `${backendUrl}/upload`;
+        const mimeType = fileAsset.mimeType || 'application/octet-stream';
+        const uploadRes = await performUpload(uploadUrl, fileAsset.uri, fileAsset.name, mimeType, token || '');
+        
         showAlert(
           'Upload Successful',
           `Document '${fileAsset.name}' was successfully uploaded and indexed into Supabase RAG memory, Sir.`
@@ -1714,8 +1713,10 @@ window.onresize = () => {
             content: `📄 Document indexed: ${fileAsset.name}\nVector RAG version has been stored.`,
           },
         ]);
-      } else {
-        showAlert('Upload Failed', data.detail || 'Failed to process document, Sir.');
+      } catch (err: any) {
+        showAlert('Upload Failed', err.message || 'Failed to process document, Sir.');
+      } finally {
+        setUploadingFile(false);
       }
     } catch (e: any) {
       showAlert('Error', `Document upload failed: ${e.message}`);
@@ -1842,7 +1843,7 @@ window.onresize = () => {
           <WebView
             source={{ html: fluidBackgroundHTML }}
             originWhitelist={['*']}
-            style={{ flex: 1, backgroundColor: '#020409' }}
+            style={{ flex: 1, backgroundColor: '#000000' }}
             scrollEnabled={false}
             javaScriptEnabled={true}
             domStorageEnabled={true}

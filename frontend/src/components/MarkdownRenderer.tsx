@@ -1013,12 +1013,14 @@ const styles = StyleSheet.create({
   },
   bodyText: {
     fontSize: 15,
-    color: '#e2e8f0',
+    color: '#f1f5f9',
     lineHeight: 22,
     marginBottom: 6,
+    fontWeight: '400',
+    letterSpacing: -0.1,
   },
   boldText: {
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#ffffff',
   },
   italicText: {
@@ -1036,7 +1038,7 @@ const styles = StyleSheet.create({
   },
   header: {
     color: '#ffffff',
-    fontWeight: 'bold',
+    fontWeight: '500',
     marginTop: 12,
     marginBottom: 8,
   },
@@ -1046,14 +1048,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     paddingBottom: 4,
+    fontWeight: '400',
+    letterSpacing: -0.4,
   },
   h2: {
     fontSize: 19,
     lineHeight: 24,
+    fontWeight: '400',
+    letterSpacing: -0.3,
   },
   h3: {
     fontSize: 17,
     lineHeight: 22,
+    fontWeight: '400',
+    letterSpacing: -0.2,
   },
   bulletRow: {
     flexDirection: 'row',
@@ -1212,10 +1220,10 @@ const styles = StyleSheet.create({
 
   // Link Card styles
   linkCard: {
-    backgroundColor: '#090d16',
+    backgroundColor: '#0c0c0c',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#171717',
     padding: 14,
     marginVertical: 8,
   },
@@ -1253,10 +1261,10 @@ const styles = StyleSheet.create({
 
   // Map Card styles
   mapCard: {
-    backgroundColor: '#090d16',
+    backgroundColor: '#0c0c0c',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#171717',
     overflow: 'hidden',
     marginVertical: 8,
   },
@@ -1267,8 +1275,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    backgroundColor: '#020409',
+    borderBottomColor: '#171717',
+    backgroundColor: '#000000',
   },
   mapCardHeaderLeft: {
     flexDirection: 'row',
@@ -1300,8 +1308,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    backgroundColor: '#020409',
+    borderTopColor: '#171717',
+    backgroundColor: '#000000',
   },
   mapCardButtonText: {
     color: '#3b82f6',
@@ -1342,10 +1350,10 @@ const styles = StyleSheet.create({
 
   // Chart Card styles
   chartCard: {
-    backgroundColor: '#090d16',
+    backgroundColor: '#0c0c0c',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#171717',
     padding: 14,
     marginVertical: 8,
   },
@@ -1367,8 +1375,8 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#1e293b',
-    backgroundColor: '#020409',
+    borderColor: '#171717',
+    backgroundColor: '#000000',
     overflow: 'hidden',
   },
   carouselScroll: {
@@ -1384,9 +1392,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 8,
-    backgroundColor: '#020409',
+    backgroundColor: '#000000',
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
+    borderTopColor: '#171717',
   },
   carouselDot: {
     width: 6,

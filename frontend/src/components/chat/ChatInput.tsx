@@ -58,7 +58,7 @@ interface ChatInputProps {
   handleStopGeneration: () => void;
   contextPercent: number;
   // Staged Attachment Props
-  stagedAttachment: { uri: string; name: string; type: 'image' | 'document'; size: number } | null;
+  stagedAttachment: { uri: string; name: string; type: 'image' | 'document'; size: number; base64?: string; mimeType?: string } | null;
   setStagedAttachment: (attachment: any) => void;
   showMediaPopover: boolean;
   setShowMediaPopover: (show: boolean) => void;
@@ -169,37 +169,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           onPress={() => setShowVariantDropdown(false)}
         />
       )}
-      {showVariantDropdown && (
-        <View style={styles.variantDropdown}>
-          {VARIANTS.map((v, i) => {
-            return (
-              <TouchableOpacity
-                key={v}
-                style={[
-                  styles.variantDropdownItem,
-                  activeVariantIndex === i && styles.variantDropdownItemActive,
-                ]}
-                onPress={() => {
-                  setActiveVariantIndex(i);
-                  setShowVariantDropdown(false);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.variantDropdownText,
-                    activeVariantIndex === i && styles.variantDropdownTextActive,
-                  ]}
-                >
-                  {v}
-                </Text>
-                {activeVariantIndex === i && (
-                  <Ionicons name="checkmark" size={12} color="#60a5fa" />
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
 
       {/* Model & Variant Toggles (Capsules) — Placed above the input to avoid safe area overlap */}
       <View style={styles.capsulesContainer}>
@@ -218,20 +187,54 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <Ionicons name="chevron-down" size={10} color="#94a3b8" />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.capsule}
-          onPress={() => setShowVariantDropdown(!showVariantDropdown)}
-        >
-          <Ionicons
-            name="options-outline"
-            size={12}
-            color="#60a5fa"
-          />
-          <Text style={styles.capsuleText}>
-            {VARIANTS[activeVariantIndex]}
-          </Text>
-          <Ionicons name="chevron-down" size={10} color="#94a3b8" />
-        </TouchableOpacity>
+        <View style={{ position: 'relative', zIndex: showVariantDropdown ? 1000 : 1 }}>
+          <TouchableOpacity
+            style={styles.capsule}
+            onPress={() => setShowVariantDropdown(!showVariantDropdown)}
+          >
+            <Ionicons
+              name="options-outline"
+              size={12}
+              color="#60a5fa"
+            />
+            <Text style={styles.capsuleText}>
+              {VARIANTS[activeVariantIndex]}
+            </Text>
+            <Ionicons name="chevron-down" size={10} color="#94a3b8" />
+          </TouchableOpacity>
+
+          {showVariantDropdown && (
+            <View style={styles.variantDropdown}>
+              {VARIANTS.map((v, i) => {
+                return (
+                  <TouchableOpacity
+                    key={v}
+                    style={[
+                      styles.variantDropdownItem,
+                      activeVariantIndex === i && styles.variantDropdownItemActive,
+                    ]}
+                    onPress={() => {
+                      setActiveVariantIndex(i);
+                      setShowVariantDropdown(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.variantDropdownText,
+                        activeVariantIndex === i && styles.variantDropdownTextActive,
+                      ]}
+                    >
+                      {v}
+                    </Text>
+                    {activeVariantIndex === i && (
+                      <Ionicons name="checkmark" size={12} color="#60a5fa" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </View>
 
         <View style={{ position: 'relative' }}>
           <TouchableOpacity
