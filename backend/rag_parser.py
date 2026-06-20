@@ -117,7 +117,7 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list:
         
     return chunks
 
-async def extract_text_from_image(file_path: str) -> str:
+async def extract_text_from_image(file_path: str, model: str = None) -> str:
     api_key = os.getenv("OPENCODE_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENCODE_API_KEY not configured on backend.")
@@ -137,8 +137,12 @@ async def extract_text_from_image(file_path: str) -> str:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read image file: {str(e)}")
         
+    # Resolve the model ID from key, defaulting to the free vision model: mimo-v2.5-free
+    from opencode_client import get_opencode_model
+    model_id = get_opencode_model(model or "mimo-v2.5-free")
+
     payload = {
-        "model": "gemini-2.5-flash",
+        "model": model_id,
         "messages": [
             {
                 "role": "user",
@@ -173,15 +177,31 @@ async def extract_text_from_image(file_path: str) -> str:
                 description = res_data["choices"][0]["message"]["content"]
                 return f"[Image OCR & Description: {os.path.basename(file_path)}]\n{description}"
             else:
+                try:
+                    err_json = response.json()
+                    err_msg = err_json.get("message") or err_json.get("detail") or response.text
+                except Exception:
+                    err_msg = response.text
+
+                # Check if it is a model support error
+                if "is not supported" in err_msg or "ModelError" in err_msg or "not support" in err_msg:
+                    friendly_model = model or "mimo-v2.5-free"
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"⚠️ The current model '{friendly_model}' does not support image/multimodal understanding, Sir. Please select a vision-capable model (like Mimo Free) from the variant dropdown."
+                    )
+                
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"OpenCode vision API returned an error: {response.text}"
+                    detail=f"OpenCode vision API returned an error: {err_msg}"
                 )
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=f"Failed to parse image using vision model: {str(e)}")
 
-async def extract_text_async(file_path: str) -> str:
+async def extract_text_async(file_path: str, model: str = None) -> str:
     _, ext = os.path.splitext(file_path.lower())
     if ext in (".png", ".jpg", ".jpeg", ".webp"):
-        return await extract_text_from_image(file_path)
+        return await extract_text_from_image(file_path, model=model)
     return extract_text(file_path)

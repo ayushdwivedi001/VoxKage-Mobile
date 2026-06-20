@@ -46,13 +46,17 @@ const performUpload = async (
   uri: string,
   name: string,
   mimeType: string,
-  token: string
+  token: string,
+  model?: string
 ): Promise<any> => {
   if (Platform.OS === 'web') {
     const blobRes = await fetch(uri);
     const blob = await blobRes.blob();
     const formData = new FormData();
     formData.append('file', blob, name);
+    if (model) {
+      formData.append('model', model);
+    }
     
     const response = await fetch(url, {
       method: 'POST',
@@ -101,6 +105,9 @@ const performUpload = async (
         name: name,
         type: mimeType,
       } as any);
+      if (model) {
+        formData.append('model', model);
+      }
       
       xhr.send(formData);
     });
@@ -138,8 +145,8 @@ export default function ChatScreen() {
     'deepseek-v4-flash-free',
     'deepseek-v4-flash',
     'deepseek-v4-pro',
-    'gemini-2.5-flash',
-    'claude-3.5-sonnet'
+    'mimo-v2.5-free',
+    'claude-sonnet-4'
   ]);
   const [activeModel, setActiveModel] = useState('deepseek-v4-flash-free');
   const VARIANTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
@@ -1465,7 +1472,7 @@ window.onresize = updateSize;
       try {
         const uploadUrl = `${backendUrl}/rag/upload`;
         const mimeType = staged.mimeType || (staged.type === 'image' ? 'image/jpeg' : 'application/octet-stream');
-        const uploadRes = await performUpload(uploadUrl, staged.uri, staged.name, mimeType, token || '');
+        const uploadRes = await performUpload(uploadUrl, staged.uri, staged.name, mimeType, token || '', activeModel);
         uploadedDocId = uploadRes.document_id;
         
         setMessages((prev) => [
@@ -1699,7 +1706,7 @@ window.onresize = updateSize;
       try {
         const uploadUrl = `${backendUrl}/upload`;
         const mimeType = fileAsset.mimeType || 'application/octet-stream';
-        const uploadRes = await performUpload(uploadUrl, fileAsset.uri, fileAsset.name, mimeType, token || '');
+        const uploadRes = await performUpload(uploadUrl, fileAsset.uri, fileAsset.name, mimeType, token || '', activeModel);
         
         showAlert(
           'Upload Successful',

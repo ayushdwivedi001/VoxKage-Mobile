@@ -21,11 +21,11 @@ def get_embedding_model():
             )
     return _model
 
-async def index_file_in_rag(file_path: str, filename: str, user_id: str, document_id: str = None) -> dict:
+async def index_file_in_rag(file_path: str, filename: str, user_id: str, document_id: str = None, model: str = None) -> dict:
     """
     Extracts text, chunks it, generates vector embeddings, and pushes it to Supabase pgvector table.
     """
-    text = await extract_text_async(file_path)
+    text = await extract_text_async(file_path, model=model)
     chunks = chunk_text(text)
     
     if not chunks:

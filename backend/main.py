@@ -783,6 +783,7 @@ async def log_webview_error(
 @app.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
+    model: str | None = Form(None),
     user: str = Depends(get_current_user)
 ):
     """
@@ -791,7 +792,7 @@ async def upload_document(
     file_path = save_upload(file)
     try:
         # Index document vectors
-        result = await index_file_in_rag(file_path, file.filename, user)
+        result = await index_file_in_rag(file_path, file.filename, user, model=model)
         # Clean up local file after indexing
         delete_file(file_path)
         return result
@@ -803,6 +804,7 @@ async def upload_document(
 async def upload_rag_document(
     file: UploadFile = File(...),
     document_id: str | None = Form(None),
+    model: str | None = Form(None),
     user: str = Depends(get_current_user)
 ):
     """
@@ -825,7 +827,7 @@ async def upload_rag_document(
     file_path = save_upload(file)
     try:
         # Index document vectors
-        result = await index_file_in_rag(file_path, file.filename, user, doc_id)
+        result = await index_file_in_rag(file_path, file.filename, user, doc_id, model=model)
         # Clean up local file after indexing
         delete_file(file_path)
         return result

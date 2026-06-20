@@ -10,8 +10,9 @@ OPENCODE_BASE_URL = "https://opencode.ai/zen/v1"
 # Map human-readable model keys to OpenCode API model strings
 MODEL_MAP = {
     "deepseek-flash": "deepseek-v4-flash-free",
-    "gemini-flash": "gemini-2.5-flash",
-    "claude-sonnet": "claude-3.5-sonnet",
+    "gemini-flash": "gemini-3.5-flash",
+    "claude-sonnet": "claude-sonnet-4",
+    "mimo-free": "mimo-v2.5-free",
 }
 
 def get_opencode_model(model_key: str) -> str:
