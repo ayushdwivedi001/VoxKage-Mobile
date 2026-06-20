@@ -835,6 +835,42 @@ async def upload_rag_document(
         delete_file(file_path)
         raise HTTPException(status_code=500, detail=f"Failed to process and index upload: {str(e)}")
 
+@app.post("/voice/transcribe")
+async def transcribe_voice(
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user)
+):
+    """
+    Receives voice recording (M4A) and transcribes it using Hugging Face's Whisper model.
+    """
+    file_path = save_upload(file)
+    try:
+        import requests
+        hf_token = os.getenv("HF_TOKEN")
+        if not hf_token:
+            raise HTTPException(status_code=500, detail="HF_TOKEN environment key is missing on backend, Sir.")
+            
+        url = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
+        headers = {"Authorization": f"Bearer {hf_token}"}
+        
+        with open(file_path, "rb") as f:
+            audio_bytes = f.read()
+            
+        # Send raw audio bytes to Hugging Face Inference API
+        response = requests.post(url, headers=headers, data=audio_bytes, timeout=30)
+        
+        if response.status_code == 200:
+            res_data = response.json()
+            transcribed_text = res_data.get("text", "").strip()
+            # Clean up local file
+            delete_file(file_path)
+            return {"text": transcribed_text}
+        else:
+            raise Exception(f"HF Whisper Inference API returned status {response.status_code}: {response.text}")
+    except Exception as e:
+        delete_file(file_path)
+        raise HTTPException(status_code=500, detail=f"Failed to transcribe audio prompt: {str(e)}")
+
 # --- WebSocket Chat Streaming Server ---
 
 async def chat_ws_reader(websocket: WebSocket, receive_queue: asyncio.Queue):
@@ -857,6 +893,14 @@ async def chat_ws_reader(websocket: WebSocket, receive_queue: asyncio.Queue):
                         
                         payload_data["status"] = status_val
                         await PROXY_REQUESTS[request_id].put(payload_data)
+                    continue
+                elif msg_type == "mobile_tool_response":
+                    from agent_loop import MOBILE_CHANNELS
+                    request_id = payload_data.get("request_id")
+                    if request_id and request_id in MOBILE_CHANNELS:
+                        future = MOBILE_CHANNELS[request_id]
+                        if not future.done():
+                            future.set_result(payload_data)
                     continue
             except Exception:
                 pass

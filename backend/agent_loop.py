@@ -913,11 +913,237 @@ TOOLS_SCHEMA = [
                 "required": ["code", "title"]
             }
         }
+    },
+    # --- Mobile Device Control Tools ---
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_get_contacts",
+            "description": "Fetch/query the user's phone contact book, sir. Supports searching by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Optional name string to filter contacts."},
+                    "limit": {"type": "integer", "description": "Max contacts to fetch.", "default": 50}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_create_contact",
+            "description": "Insert a new contact card into the user's phone contact book, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "firstName": {"type": "string", "description": "First name of the contact."},
+                    "lastName": {"type": "string", "description": "Optional last name."},
+                    "phone": {"type": "string", "description": "Phone number."},
+                    "email": {"type": "string", "description": "Optional email address."}
+                },
+                "required": ["firstName"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_get_calendar_events",
+            "description": "Read scheduled events from the user's phone calendar between dates, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "startDate": {"type": "string", "description": "ISO date string (e.g. 2026-06-20T10:00:00Z). Defaults to now."},
+                    "endDate": {"type": "string", "description": "ISO date string. Defaults to 7 days from now."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_create_calendar_event",
+            "description": "Add a new calendar meeting or event on the user's phone calendar, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Event title."},
+                    "startDate": {"type": "string", "description": "ISO date string of start time."},
+                    "endDate": {"type": "string", "description": "ISO date string of end time."},
+                    "location": {"type": "string", "description": "Optional event location."},
+                    "notes": {"type": "string", "description": "Optional meeting notes or description."}
+                },
+                "required": ["title", "startDate", "endDate"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_show_notification",
+            "description": "Show a local push notification alert on the user's phone, sir. Can be scheduled with delay.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Notification title."},
+                    "body": {"type": "string", "description": "Notification description/body message."},
+                    "delaySeconds": {"type": "integer", "description": "Optional delay in seconds before showing."}
+                },
+                "required": ["title", "body"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_get_location",
+            "description": "Fetch the user's current GPS location coordinates (latitude and longitude) from the phone, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_get_device_stats",
+            "description": "Get current battery level, battery state, network connection type, and hardware model specifications of the phone, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_trigger_haptic",
+            "description": "Trigger tactile vibration feedback (buzz) on the user's phone, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "style": {"type": "string", "enum": ["light", "medium", "heavy", "success", "warning", "error"], "default": "medium"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_launch_intent",
+            "description": "Android-specific tool to trigger standard intents like opening settings, Wi-Fi, location, maps, or calling, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "description": "Intent action settings/wifi/location or generic intent string."},
+                    "data": {"type": "string", "description": "Optional intent data (e.g. geo:12.9716,77.5946 or tel:9876543210)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_share_file",
+            "description": "Share a file path or URL via native share sheet on the phone, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "uri": {"type": "string", "description": "Local URI or web URL to share."},
+                    "title": {"type": "string", "description": "Optional title for share dialog."},
+                    "mimeType": {"type": "string", "description": "Optional file MIME type."}
+                },
+                "required": ["uri"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_print_pdf",
+            "description": "Render HTML text or code to PDF and trigger printing on the phone, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "HTML content to render."},
+                    "printDirectly": {"type": "boolean", "description": "Whether to launch print dialog directly.", "default": False}
+                },
+                "required": ["html"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_send_sms",
+            "description": "Send an SMS text message to one or more phone numbers from the phone, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipients": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of phone numbers."
+                    },
+                    "message": {"type": "string", "description": "Text message content."}
+                },
+                "required": ["recipients", "message"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_set_screen_keep_awake",
+            "description": "Enable or disable keeping the screen awake indefinitely on the phone, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "enable": {"type": "boolean", "description": "True to activate keep-awake, False to deactivate."}
+                },
+                "required": ["enable"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_speak_text",
+            "description": "Speak text aloud using the device's native Text-to-Speech (TTS) engine, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to synthesize and read aloud."},
+                    "language": {"type": "string", "description": "Language code. Defaults to 'en'."},
+                    "pitch": {"type": "number", "description": "Vocal pitch scale (0.5 to 2.0)."},
+                    "rate": {"type": "number", "description": "Vocal speaking rate speed (0.5 to 2.0)."}
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mobile_get_media_library",
+            "description": "Retrieve recent photo assets metadata from the user's phone media library, sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max assets to return. Defaults to 10.", "default": 10}
+                }
+            }
+        }
     }
 ]
 
 # Shared laptop responses channel: { email: asyncio.Future }
 LAPTOP_CHANNELS = {}
+# Shared mobile responses channel: { request_id: asyncio.Future }
+MOBILE_CHANNELS = {}
 
 
 class HudStreamParser:
@@ -1762,6 +1988,40 @@ async def _run_agentic_loop_impl(
                                 "Error: No laptop is currently connected to this account. "
                                 "Please launch the VoxKage Laptop Daemon to run local actions, sir."
                             )
+                    elif name.startswith("mobile_"):
+                        yield json.dumps({"type": "hud_log", "content": f"Requesting device action: {name}"})
+                        
+                        import uuid
+                        req_id = str(uuid.uuid4())
+                        
+                        loop = asyncio.get_running_loop()
+                        future = loop.create_future()
+                        MOBILE_CHANNELS[req_id] = future
+                        
+                        if client_websocket:
+                            await client_websocket.send_text(json.dumps({
+                                "type": "mobile_tool_call",
+                                "request_id": req_id,
+                                "tool_name": name,
+                                "arguments": args
+                            }))
+                            
+                            try:
+                                result_payload = await asyncio.wait_for(future, timeout=60.0)
+                                status_res = result_payload.get("status")
+                                result_val = result_payload.get("result")
+                                
+                                if status_res == "success":
+                                    tool_output = json.dumps(result_val)
+                                else:
+                                    tool_output = f"Error executing device tool, Sir: {result_val}"
+                            except asyncio.TimeoutError:
+                                tool_output = "Error: Mobile device tool execution timed out (60s limit)."
+                            finally:
+                                if req_id in MOBILE_CHANNELS:
+                                    del MOBILE_CHANNELS[req_id]
+                        else:
+                            tool_output = "Error: Active WebSocket is not available to route device command."
                     elif name == "get_current_datetime":
                         if client_time:
                             tool_output = json.dumps({

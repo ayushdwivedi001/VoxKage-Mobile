@@ -130,5 +130,59 @@ export const storage = {
     } catch (e) {
       console.error('Error saving favorite models', e);
     }
+  },
+
+  async getContacts(): Promise<any[]> {
+    try {
+      let data = '';
+      if (Platform.OS === 'web') {
+        data = localStorage.getItem('voxkage_contacts_db') || '[]';
+      } else {
+        data = await SecureStore.getItemAsync('voxkage_contacts_db') || '[]';
+      }
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  },
+
+  async setContacts(contacts: any[]): Promise<void> {
+    try {
+      const data = JSON.stringify(contacts);
+      if (Platform.OS === 'web') {
+        localStorage.setItem('voxkage_contacts_db', data);
+      } else {
+        await SecureStore.setItemAsync('voxkage_contacts_db', data);
+      }
+    } catch (e) {
+      console.error('Error saving sandbox contacts', e);
+    }
+  },
+
+  async getCalendarEvents(): Promise<any[]> {
+    try {
+      let data = '';
+      if (Platform.OS === 'web') {
+        data = localStorage.getItem('voxkage_calendar_db') || '[]';
+      } else {
+        data = await SecureStore.getItemAsync('voxkage_calendar_db') || '[]';
+      }
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  },
+
+  async setCalendarEvents(events: any[]): Promise<void> {
+    try {
+      const data = JSON.stringify(events);
+      if (Platform.OS === 'web') {
+        localStorage.setItem('voxkage_calendar_db', data);
+      } else {
+        await SecureStore.setItemAsync('voxkage_calendar_db', data);
+      }
+    } catch (e) {
+      console.error('Error saving sandbox calendar events', e);
+    }
   }
 };

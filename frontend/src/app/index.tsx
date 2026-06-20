@@ -36,6 +36,25 @@ import { ChatFeed, ChatMessage } from '@/components/chat/ChatFeed';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { SidebarDrawer, ChatSession } from '@/components/chat/SidebarDrawer';
 import { PlaygroundDrawer } from '@/components/chat/PlaygroundDrawer';
+import { VoiceWaveVisualizer } from '@/components/chat/VoiceWaveVisualizer';
+import { executeMobileTool } from '@/utils/mobileTools';
+import { registerBackgroundTasks } from '@/utils/backgroundWorker';
+
+let Audio: any = null;
+let Speech: any = null;
+
+try {
+  const ExpoAV = require('expo-av');
+  Audio = ExpoAV ? ExpoAV.Audio : null;
+} catch (e) {
+  console.log('[ChatScreen] expo-av is not available, Sir. Using sandbox/mock fallback.');
+}
+
+try {
+  Speech = require('expo-speech');
+} catch (e) {
+  console.log('[ChatScreen] expo-speech is not available, Sir. Using sandbox/mock fallback.');
+}
 
 const generateRandomId = (prefix: string = 'rand'): string => {
   return `${prefix}-${Math.floor(Math.random() * 10000000)}`;
@@ -162,6 +181,8 @@ export default function ChatScreen() {
 
   // UI Toggles & Controls
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [micVolume, setMicVolume] = useState(0.1);
+  const recordingRef = useRef<any>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   
   // Staged Attachment & Media States
@@ -208,6 +229,7 @@ export default function ChatScreen() {
   const wsRef = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList | null>(null);
   const activeEditingProjectIdRef = useRef<string | null>(null);
+  const wasLastInputVoice = useRef(false);
   const projectsRef = useRef<any[]>([]);
   const streamingTextRef = useRef('');
 
@@ -298,6 +320,9 @@ export default function ChatScreen() {
       const storedToken = await storage.getToken();
       const storedEmail = await storage.getEmail();
       const storedUrl = await storage.getBackendUrl();
+
+      // Register OS-level background fetch tasks
+      registerBackgroundTasks();
 
       if (!storedToken) {
         router.replace('/login');
@@ -1002,6 +1027,28 @@ window.onresize = updateSize;
           };
 
           runProxyQuery();
+        } else if (data.type === 'mobile_tool_call') {
+          const { request_id, tool_name, arguments: toolArgs } = data;
+          const runMobileTool = async () => {
+            try {
+              const result = await executeMobileTool(tool_name, toolArgs);
+              ws.send(JSON.stringify({
+                type: 'mobile_tool_response',
+                request_id,
+                status: 'success',
+                result
+              }));
+            } catch (err: any) {
+              console.error('[-] Mobile tool execution failed:', err);
+              ws.send(JSON.stringify({
+                type: 'mobile_tool_response',
+                request_id,
+                status: 'error',
+                result: err?.message || String(err)
+              }));
+            }
+          };
+          runMobileTool();
         } else if (data.type === 'error') {
           setCompactionProgress(null);
           let errorMsg = data.content;
@@ -1047,6 +1094,21 @@ window.onresize = updateSize;
           const currText = streamingTextRef.current;
           updateStreamingText('');
           
+          if (wasLastInputVoice.current && currText.trim()) {
+            const cleanText = currText
+              .replace(/```[\s\S]*?```/g, '') // remove code blocks
+              .replace(/<[^>]*>/g, '') // remove custom elements
+              .replace(/\*|_/g, '') // remove markdown bold/italic formatting
+              .trim();
+            if (cleanText) {
+              if (Speech && Speech.speak) {
+                Speech.speak(cleanText, { language: 'en' });
+              } else {
+                console.log('[Speech Fallback] Text to synthesize:', cleanText);
+              }
+            }
+          }
+
           if (currText.trim()) {
             const assistantMessageId = generateRandomId('assistant');
             const editingId = associatedProjectId || activeEditingProjectIdRef.current;
@@ -1280,10 +1342,12 @@ window.onresize = updateSize;
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputText.trim() && !stagedAttachment) return;
+  const handleSendMessage = async (overrideText?: string) => {
+    const textToUse = typeof overrideText === 'string' ? overrideText : undefined;
+    const userQuery = textToUse !== undefined ? textToUse.trim() : inputText.trim();
+    if (!userQuery && !stagedAttachment) return;
 
-    const userQuery = inputText.trim();
+    wasLastInputVoice.current = textToUse !== undefined;
 
     // Check if side-channel (/btw) is active or initiated
     if (showBtwOverlay || userQuery.startsWith('/btw')) {
@@ -1732,13 +1796,100 @@ window.onresize = updateSize;
     }
   };
 
-  const handleVoicePress = () => {
-    setIsVoiceActive(!isVoiceActive);
+  const transcribeAudio = async (uri: string) => {
+    setThinkingStatus('Transcribing voice prompt, Sir...');
+    setLoading(true);
+    try {
+      const url = `${backendUrl}/voice/transcribe`;
+      const mimeType = 'audio/m4a';
+      const res = await performUpload(url, uri, 'voice_input.m4a', mimeType, token || '');
+      if (res && res.text) {
+        setInputText(res.text);
+        // Automatically submit the message
+        handleSendMessage(res.text);
+      }
+    } catch (e: any) {
+      showAlert('Voice Transcription Failed', `Failed to transcribe: ${e.message}`);
+    } finally {
+      setLoading(false);
+      setThinkingStatus(null);
+    }
+  };
+
+  const handleVoicePress = async () => {
+    if (!Audio) {
+      showAlert('Voice Recording Unavailable', 'Microphone/Audio recording is not supported in this client. The expo-av module could not be loaded, Sir.');
+      return;
+    }
     if (!isVoiceActive) {
-      setTimeout(() => {
+      try {
+        const { granted } = await Audio.requestPermissionsAsync();
+        if (!granted) {
+          showAlert('Permission Denied', 'Microphone permission is required to record voice commands, Sir.');
+          return;
+        }
+        
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+
+        setIsVoiceActive(true);
+        setMicVolume(0.1);
+
+        const { recording } = await Audio.Recording.createAsync(
+          {
+            isMeteringEnabled: true,
+            android: {
+              extension: '.m4a',
+              outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+              audioEncoder: Audio.AndroidAudioEncoder.AAC,
+              sampleRate: 16000,
+              numberOfChannels: 1,
+              bitRate: 64000,
+            },
+            ios: {
+              extension: '.m4a',
+              outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+              audioQuality: Audio.IOSAudioQuality.MEDIUM,
+              sampleRate: 16000,
+              numberOfChannels: 1,
+              bitRate: 64000,
+            },
+            web: {},
+          },
+          (status: any) => {
+            if (status.metering !== undefined) {
+              const db = status.metering || -160;
+              const normalized = Math.max(-60, Math.min(0, db));
+              const vol = (normalized + 60) / 60;
+              setMicVolume(vol);
+            }
+          },
+          80
+        );
+        recordingRef.current = recording;
+      } catch (err: any) {
+        showAlert('Microphone Error', `Failed to start recording: ${err.message}`);
         setIsVoiceActive(false);
-        setInputText('Run git status and check my workspace files');
-      }, 3000);
+      }
+    } else {
+      setIsVoiceActive(false);
+      const recording = recordingRef.current;
+      if (recording) {
+        recordingRef.current = null;
+        try {
+          await recording.stopAndUnloadAsync();
+          const uri = recording.getURI();
+          if (uri) {
+            await transcribeAudio(uri);
+          }
+        } catch (err: any) {
+          console.error('Error stopping audio recording:', err);
+        }
+      }
     }
   };
 
@@ -2073,7 +2224,7 @@ window.onresize = updateSize;
       {isVoiceActive && (
         <View style={styles.voiceOverlay}>
           <Text style={styles.voiceTitle}>Listening...</Text>
-          <ActivityIndicator size="large" color="#ef4444" style={styles.voiceIndicator} />
+          <VoiceWaveVisualizer active={isVoiceActive} volume={micVolume} />
           <Text style={styles.voiceSubtitle}>Speak your instruction, Sir</Text>
         </View>
       )}
