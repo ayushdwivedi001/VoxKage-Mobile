@@ -4,30 +4,13 @@ import {
   View,
   TouchableOpacity,
   Animated,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Alert,
-  FlatList,
-  LogBox,
-  StyleSheet,
-  Modal,
-  Linking,
-  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-LogBox.ignoreLogs([
-  'Cannot record touch end without a touch start',
-  'Cannot connect to Expo CLI',
-]);
-
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
-import { WebView } from 'react-native-webview';
-import { LinearGradient } from 'expo-linear-gradient';
 import { storage } from '@/utils/storage';
 
 // Import refactored components & styles
@@ -35,34 +18,25 @@ import { styles, drawerWidth } from '@/components/chat/styles';
 import { DeleteConfirmModal } from '@/components/chat/DeleteConfirmModal';
 import { ModelSelectionModal } from '@/components/chat/ModelSelectionModal';
 import { WelcomeGreeting } from '@/components/chat/WelcomeGreeting';
-import { ChatFeed, ChatMessage } from '@/components/chat/ChatFeed';
+import { ChatFeed } from '@/components/chat/ChatFeed';
 import { ChatInput } from '@/components/chat/ChatInput';
-import { SidebarDrawer, ChatSession } from '@/components/chat/SidebarDrawer';
+import { SidebarDrawer } from '@/components/chat/SidebarDrawer';
 import { PlaygroundDrawer } from '@/components/chat/PlaygroundDrawer';
-import { VoiceWaveVisualizer } from '@/components/chat/VoiceWaveVisualizer';
-import { WorkflowNode } from '@/components/chat/ToolWorkflowPath';
-import { executeMobileTool, selectBestVoice } from '@/utils/mobileTools';
 import { registerBackgroundTasks } from '@/utils/backgroundWorker';
+import { VoiceWaveVisualizer } from '@/components/chat/VoiceWaveVisualizer';
 
-let Audio: any = null;
-let Speech: any = null;
+// Modular Sub-Components
+import { FluidBackground } from '@/components/chat/FluidBackground';
+import { BtwOverlay } from '@/components/chat/BtwOverlay';
+import { ThinkingLogsModal } from '@/components/chat/ThinkingLogsModal';
+import { SourcesModal } from '@/components/chat/SourcesModal';
 
-try {
-  const ExpoAV = require('expo-av');
-  Audio = ExpoAV ? ExpoAV.Audio : null;
-} catch (e) {
-  console.log('[ChatScreen] expo-av is not available, Sir. Using sandbox/mock fallback.');
-}
-
-try {
-  Speech = require('expo-speech');
-} catch (e) {
-  console.log('[ChatScreen] expo-speech is not available, Sir. Using sandbox/mock fallback.');
-}
-
-const generateRandomId = (prefix: string = 'rand'): string => {
-  return `${prefix}-${Math.floor(Math.random() * 10000000)}`;
-};
+// Modular Hooks
+import { useChatSessions } from '@/hooks/useChatSessions';
+import { usePlayground } from '@/hooks/usePlayground';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { useVoiceLoop } from '@/hooks/useVoiceLoop';
+import { useMediaPickers } from '@/hooks/useMediaPickers';
 
 const performUpload = async (
   url: string,
@@ -149,20 +123,6 @@ export default function ChatScreen() {
   const [backendUrl, setBackendUrl] = useState('');
   const [email, setEmail] = useState<string | null>(null);
 
-  // Chat Data State
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [streamingText, setStreamingText] = useState('');
-  const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
-  const [isNewChat, setIsNewChat] = useState(true);
-
-  // Context & Compaction State
-  const [contextPercent, setContextPercent] = useState(0);
-  const [compactionProgress, setCompactionProgress] = useState<number | null>(null);
-
   // Models & Variant State
   const [models, setModels] = useState<string[]>([
     'deepseek-v4-flash-free',
@@ -178,131 +138,212 @@ export default function ChatScreen() {
   const [showModelModal, setShowModelModal] = useState(false);
   const [showVariantDropdown, setShowVariantDropdown] = useState(false);
 
-  // Inline Sidebar Session Rename State
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editingSessionName, setEditingSessionName] = useState('');
-  const [sessionToDelete, setSessionToDelete] = useState<{ id: string; name: string } | null>(null);
-
-  // UI Toggles & Controls
-  const [isVoiceActive, setIsVoiceActive] = useState(false);
-  const [micVolume, setMicVolume] = useState(0.1);
-  const recordingRef = useRef<any>(null);
-  const [uploadingFile, setUploadingFile] = useState(false);
-  
-  // Staged Attachment & Media States
-  const [stagedAttachment, setStagedAttachment] = useState<{ uri: string; name: string; type: 'image' | 'document'; size: number; base64?: string; mimeType?: string } | null>(null);
-  const [showMediaPopover, setShowMediaPopover] = useState(false);
-
-  // Playground Code Sandbox State
-  const [playgroundHtml, setPlaygroundHtml] = useState('<h1>No live preview compiled yet, Sir.</h1><p>Ask VoxKage to build an app/web page to see it live here.</p>');
-  const [playgroundCss, setPlaygroundCss] = useState('');
-  const [playgroundJs, setPlaygroundJs] = useState('');
-  const [playgroundProjectName, setPlaygroundProjectName] = useState('New Live App');
-  const [playgroundProjectId, setPlaygroundProjectId] = useState<string | null>(null);
-  const [playgroundRevision, setPlaygroundRevision] = useState(0);
-  const [activeEditingProjectId, setActiveEditingProjectId] = useState<string | null>(null);
-
-  // Playground list state
-  const [projects, setProjects] = useState<any[]>([]);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
-  const [projectToRename, setProjectToRename] = useState<{ id: string; name: string } | null>(null);
-  const [renameProjectName, setRenameProjectName] = useState('');
-  const [playgroundView, setPlaygroundView] = useState<'list' | 'preview'>('list');
-  const [messageProjectIds, setMessageProjectIds] = useState<Record<string, string>>({});
-
-  // Animated Drawers
+  // UI Toggles & Drawers
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isPlaygroundOpen, setIsPlaygroundOpen] = useState(false);
   const [showSidebarSettings, setShowSidebarSettings] = useState(false);
-
-  // Slash Commands /btw & /drill states
   const [showCommandPopup, setShowCommandPopup] = useState(false);
   const [commandPopupActiveIndex, setCommandPopupActiveIndex] = useState(0);
-  const [showBtwOverlay, setShowBtwOverlay] = useState(false);
-  const [btwMessages, setBtwMessages] = useState<{ role: string; content: string }[]>([]);
-  const [btwLoading, setBtwLoading] = useState(false);
-
-
-  // Agentic Concurrency & Thinking Log States
-  const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([]);
-  const [thinkingLogs, setThinkingLogs] = useState<string[]>([]);
-  const [isThinkingDrawerOpen, setIsThinkingDrawerOpen] = useState(false);
-  const [confirmationToolName, setConfirmationToolName] = useState<string | null>(null);
-  const [confirmationToolLabel, setConfirmationToolLabel] = useState<string | null>(null);
-  const [confirmationRequestId, setConfirmationRequestId] = useState<string | null>(null);
 
   // Sources Bottom Sheet State
   const [isSourcesDrawerOpen, setIsSourcesDrawerOpen] = useState(false);
   const [activeSources, setActiveSources] = useState<{ title: string; url: string; domain: string }[]>([]);
 
+  // Thinking Logs Bottom Sheet State
+  const [isThinkingLogsOpen, setIsThinkingLogsOpen] = useState(false);
+
+  // Animated Drawers
   const [sidebarAnim] = useState(() => new Animated.Value(-280));
   const [playgroundAnim] = useState(() => new Animated.Value(drawerWidth));
-
-  // Border lit up entrance animation
   const [borderGlowAnim] = useState(() => new Animated.Value(0));
 
-  // References
-  const wsRef = useRef<WebSocket | null>(null);
-  const flatListRef = useRef<FlatList | null>(null);
-  const activeEditingProjectIdRef = useRef<string | null>(null);
-  const wasLastInputVoice = useRef(false);
-  const projectsRef = useRef<any[]>([]);
-  const streamingTextRef = useRef('');
+  const flatListRef = useRef<any>(null);
 
-  const updateStreamingText = (text: string | ((prev: string) => string)) => {
-    setStreamingText((prev) => {
-      const next = typeof text === 'function' ? text(prev) : text;
-      streamingTextRef.current = next;
-      return next;
-    });
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}: ${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
   };
 
-  useEffect(() => {
-    activeEditingProjectIdRef.current = activeEditingProjectId;
-  }, [activeEditingProjectId]);
+  const openSidebar = () => {
+    setIsSidebarOpen(true);
+    Animated.timing(sidebarAnim, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+  };
 
-  useEffect(() => {
-    projectsRef.current = projects;
-  }, [projects]);
+  const closeSidebar = () => {
+    Animated.timing(sidebarAnim, {
+      toValue: -280,
+      duration: 220,
+      useNativeDriver: false,
+    }).start(() => setIsSidebarOpen(false));
+  };
 
-  useEffect(() => {
-    if (inputText.startsWith('/')) {
-      const lowerInput = inputText.toLowerCase();
-      
-      const hasExactCommand = COMMANDS.some(cmd => 
-        lowerInput === cmd.name.toLowerCase() || 
-        lowerInput.startsWith(cmd.name.toLowerCase() + ' ')
-      );
+  const openPlayground = () => {
+    setIsPlaygroundOpen(true);
+    Animated.timing(playgroundAnim, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+  };
 
-      if (hasExactCommand) {
-        setShowCommandPopup(false);
-        return;
+  const closePlayground = () => {
+    Animated.timing(playgroundAnim, {
+      toValue: drawerWidth,
+      duration: 220,
+      useNativeDriver: false,
+    }).start(() => setIsPlaygroundOpen(false));
+  };
+
+  // 1. Declare Refs to decouple circular dependencies
+  const sessionRef = useRef({
+    currentSessionId: null as string | null,
+    sessions: [] as any[],
+    setCurrentSessionId: (() => {}) as React.Dispatch<React.SetStateAction<string | null>>,
+    setSessions: (() => {}) as React.Dispatch<React.SetStateAction<any[]>>,
+    setIsNewChat: (() => {}) as React.Dispatch<React.SetStateAction<boolean>>,
+    setContextPercent: (() => {}) as React.Dispatch<React.SetStateAction<number>>,
+    setCompactionProgress: (() => {}) as React.Dispatch<React.SetStateAction<number | null>>,
+    setIsThinkingLogsOpen: (() => {}) as React.Dispatch<React.SetStateAction<boolean>>,
+  });
+
+  const loadProjectsRef = useRef<((url: string, jwtToken: string) => Promise<void>) | null>(null);
+  const handleSaveProjectRef = useRef<((name: string, html: string, css: string, js: string, projectId: string | null) => Promise<string | null>) | null>(null);
+  const connectWebSocketRef = useRef<((sessionId: string, token: string, url: string) => void) | null>(null);
+  const handleSendMessageRef = useRef<((overrideText?: string) => Promise<void>) | null>(null);
+
+  // Instantiating Modular Hooks
+  const mediaPickers = useMediaPickers(
+    backendUrl,
+    token,
+    activeModel,
+    showAlert,
+    performUpload
+  );
+
+  const playground = usePlayground(
+    backendUrl,
+    token,
+    openPlayground,
+    showAlert
+  );
+
+  const webSocket = useWebSocket(
+    backendUrl,
+    token,
+    activeModel,
+    VARIANTS,
+    activeVariantIndex,
+    sessionRef,
+    mediaPickers.stagedAttachment,
+    mediaPickers.setStagedAttachment,
+    playground.activeEditingProjectId,
+    playground.setActiveEditingProjectId,
+    playground.projects,
+    loadProjectsRef,
+    playground.setPlaygroundHtml,
+    playground.setPlaygroundCss,
+    playground.setPlaygroundJs,
+    playground.setPlaygroundProjectName,
+    playground.setPlaygroundRevision,
+    playground.setPlaygroundView,
+    openPlayground,
+    handleSaveProjectRef,
+    mediaPickers.setUploadingFile,
+    showAlert,
+    performUpload
+  );
+
+  const chatSessions = useChatSessions(
+    backendUrl,
+    token,
+    webSocket.inputText,
+    webSocket.wsRef,
+    webSocket.setMessages,
+    webSocket.setStreamingText,
+    closeSidebar,
+    showAlert,
+    connectWebSocketRef,
+    (msgs) => {
+      // Inline scanner helper
+      let htmlCode = '';
+      let cssCode = '';
+      let jsCode = '';
+      for (const msg of msgs) {
+        if (msg.role !== 'assistant') continue;
+        const htmlMatch = msg.content.match(/```html\n([\s\S]*?)```/);
+        const cssMatch = msg.content.match(/```css\n([\s\S]*?)```/);
+        const jsMatch =
+          msg.content.match(/```javascript\n([\s\S]*?)```/) || msg.content.match(/```js\n([\s\S]*?)```/);
+
+        if (htmlMatch) htmlCode = htmlMatch[1];
+        if (cssMatch) cssCode = cssMatch[1];
+        if (jsMatch) jsCode = jsMatch[1];
       }
-
-      const matches = COMMANDS.filter(cmd => 
-        cmd.name.toLowerCase().startsWith(lowerInput)
-      );
-
-      if (matches.length > 0) {
-        setShowCommandPopup(true);
-        setCommandPopupActiveIndex(prev => prev >= matches.length ? 0 : prev);
-      } else {
-        setShowCommandPopup(false);
+      if (htmlCode || cssCode || jsCode) {
+        playground.setPlaygroundHtml(htmlCode || '<h1>Live Preview</h1>');
+        playground.setPlaygroundCss(cssCode || '');
+        playground.setPlaygroundJs(jsCode || '');
+        playground.setPlaygroundProjectName('Live Preview Sandbox');
+        playground.setPlaygroundRevision((prev) => prev + 1);
       }
-    } else {
-      setShowCommandPopup(false);
     }
-  }, [inputText]);
+  );
 
-  const filteredCommands = inputText.startsWith('/')
-    ? COMMANDS.filter(cmd => cmd.name.toLowerCase().startsWith(inputText.toLowerCase()))
-    : [];
+  const voiceLoop = useVoiceLoop(
+    backendUrl,
+    token,
+    webSocket.setInputText,
+    webSocket.setLoading,
+    webSocket.setThinkingStatus,
+    handleSendMessageRef,
+    showAlert,
+    performUpload
+  );
 
+  // Sync refs with the latest state values on every render
+  sessionRef.current = {
+    currentSessionId: chatSessions.currentSessionId,
+    sessions: chatSessions.sessions,
+    setCurrentSessionId: chatSessions.setCurrentSessionId,
+    setSessions: chatSessions.setSessions,
+    setIsNewChat: chatSessions.setIsNewChat,
+    setContextPercent: chatSessions.setContextPercent,
+    setCompactionProgress: chatSessions.setCompactionProgress,
+    setIsThinkingLogsOpen,
+  };
 
+  loadProjectsRef.current = playground.loadProjects;
+  handleSaveProjectRef.current = playground.handleSaveProject;
+  connectWebSocketRef.current = webSocket.connectWebSocket;
+  handleSendMessageRef.current = webSocket.handleSendMessage;
+
+  const wsRef = webSocket.wsRef;
+
+  // Sync state between hook states
+  const sessions = chatSessions.sessions;
+  const currentSessionId = chatSessions.currentSessionId;
+  const messages = webSocket.messages;
+  const inputText = webSocket.inputText;
+  const loading = webSocket.loading || mediaPickers.uploadingFile;
+  const streamingText = webSocket.streamingText;
+  const thinkingStatus = webSocket.thinkingStatus || mediaPickers.thinkingStatusLocal;
+  const isNewChat = chatSessions.isNewChat;
+  const contextPercent = chatSessions.contextPercent;
+  const compactionProgress = chatSessions.compactionProgress;
+  const editingSessionId = chatSessions.editingSessionId;
+  const editingSessionName = chatSessions.editingSessionName;
+  const sessionToDelete = chatSessions.sessionToDelete;
 
   const handleToggleFavorite = async (modelId: string) => {
     const nextFavs = favorites.includes(modelId)
-      ? favorites.filter(id => id !== modelId)
+      ? favorites.filter((id) => id !== modelId)
       : [...favorites, modelId];
     setFavorites(nextFavs);
     await storage.setFavoriteModels(nextFavs);
@@ -323,195 +364,23 @@ export default function ChatScreen() {
     }
   };
 
-  const showAlert = (title: string, message: string) => {
-    if (Platform.OS === 'web') {
-      window.alert(`${title}: ${message}`);
-    } else {
-      Alert.alert(title, message);
-    }
+  const handleLogout = async () => {
+    await storage.clearAuth();
+    if (wsRef.current) wsRef.current.close();
+    router.replace('/login');
   };
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      const storedToken = await storage.getToken();
-      const storedEmail = await storage.getEmail();
-      const storedUrl = await storage.getBackendUrl();
-
-      // Register OS-level background fetch tasks
-      registerBackgroundTasks();
-
-      if (!storedToken) {
-        router.replace('/login');
-        return;
-      }
-
-      setToken(storedToken);
-      setEmail(storedEmail);
-      setBackendUrl(storedUrl);
-
-      // Trigger border lighting entrance transition (gracious breathing pulse)
-      Animated.sequence([
-        Animated.timing(borderGlowAnim, {
-          toValue: 1,
-          duration: 1200,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(borderGlowAnim, {
-          toValue: 0.35,
-          duration: 800,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(borderGlowAnim, {
-          toValue: 0.75,
-          duration: 800,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(borderGlowAnim, {
-          toValue: 0.22,
-          duration: 1500,
-          useNativeDriver: Platform.OS !== 'web',
-        })
-      ]).start();
-
-      // Fetch dynamic models list from backend
-      fetchModels(storedUrl, storedToken);
-
-      if (storedToken.startsWith('mock-')) {
-        setSessions([
-          { id: 'mock-1', name: 'Mock Live Dashboard Preview', created_at: '2026-06-17' },
-          { id: 'mock-2', name: 'System Volume command log', created_at: '2026-06-17' },
-        ]);
-        setProjects([
-          { id: 'mock-p1', name: 'Todo App responsive preview', html: '<h1>Todo App responsive preview</h1>', css: '', js: '' }
-        ]);
+  const handleKeyPress = (e: any) => {
+    if (e.nativeEvent.key === 'Enter') {
+      const activeCmd = filteredCommands[commandPopupActiveIndex];
+      if (showCommandPopup && activeCmd) {
+        webSocket.setInputText(activeCmd.name + ' ');
+        setShowCommandPopup(false);
       } else {
-        loadSessions(storedUrl, storedToken);
-        loadProjects(storedUrl, storedToken);
+        webSocket.handleSendMessage();
       }
-    };
-    checkAuth();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (flatListRef.current) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
     }
-  }, [messages, streamingText]);
-
-  // Fluid background HTML (Canvas-based perlin noise shader)
-  const fluidBackgroundHTML = `
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { background: #000000; overflow: hidden; width: 100%; height: 100%; -webkit-overflow-scrolling: touch; }
-  canvas { display: block; width: 100%; height: 100%; }
-</style>
-</head>
-<body>
-<canvas id="c"></canvas>
-<script>
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-
-// Lock canvas dimensions to maximum screen dimensions to prevent keyboard resizing jumps
-let w = canvas.width = window.screen.width || window.innerWidth || 360;
-let h = canvas.height = window.screen.height || window.innerHeight || 640;
-let maxW = w;
-let maxH = h;
-
-function updateSize() {
-  const currentW = window.innerWidth || document.documentElement.clientWidth || 360;
-  const currentH = window.innerHeight || document.documentElement.clientHeight || 640;
-  // If the viewport expands (e.g. rotation), update our max bounds. 
-  // We ignore shrinking (which is the keyboard pushing up) to keep the background static.
-  if (currentW > maxW) maxW = currentW;
-  if (currentH > maxH) maxH = currentH;
-  
-  if (canvas.width !== maxW || canvas.height !== maxH) {
-    canvas.width = maxW;
-    canvas.height = maxH;
-    w = maxW;
-    h = maxH;
-  }
-}
-updateSize();
-
-let t = 0;
-
-// Create an offscreen noise pattern to achieve an organic paper/film grain texture
-const noiseCanvas = document.createElement('canvas');
-const nCtx = noiseCanvas.getContext('2d');
-noiseCanvas.width = 128;
-noiseCanvas.height = 128;
-const nData = nCtx.createImageData(128, 128);
-const d = nData.data;
-for (let i = 0; i < d.length; i += 4) {
-  const val = Math.floor(Math.random() * 255);
-  d[i] = val;     // R
-  d[i+1] = val;   // G
-  d[i+2] = val;   // B
-  d[i+3] = 9;     // Alpha (grain opacity ~3.5%)
-}
-nCtx.putImageData(nData, 0, 0);
-const noisePattern = ctx.createPattern(noiseCanvas, 'repeat');
-
-function draw() {
-  updateSize();
-  
-  // Solid pure black base
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, w, h);
-
-  t += 0.0006; // extremely slow, premium gradient movement
-
-  // Draw 2 massive glowing dark blue/indigo gradients anchored at the bottom
-  // Blob 1: Dark Indigo/Blue (bottom left-middle)
-  const b1x = w * 0.3 + Math.sin(t * 0.5) * w * 0.18;
-  const b1y = h * 1.05 + Math.cos(t * 0.3) * 20;
-  const b1r = h * 0.72 + Math.sin(t * 0.2) * 50;
-  const grad1 = ctx.createRadialGradient(b1x, b1y, 0, b1x, b1y, b1r);
-  grad1.addColorStop(0, 'rgba(29, 78, 216, 0.58)'); // rich vibrant royal blue
-  grad1.addColorStop(0.45, 'rgba(30, 58, 138, 0.22)');
-  grad1.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = grad1;
-  ctx.fillRect(0, 0, w, h);
-
-  // Blob 2: Deep Navy/Cobalt (bottom right-middle)
-  const b2x = w * 0.72 + Math.cos(t * 0.4) * w * 0.22;
-  const b2y = h * 1.02 + Math.sin(t * 0.6) * 20;
-  const b2r = h * 0.80 + Math.cos(t * 0.3) * 60;
-  const grad2 = ctx.createRadialGradient(b2x, b2y, 0, b2x, b2y, b2r);
-  grad2.addColorStop(0, 'rgba(37, 99, 235, 0.48)'); // cobalt blue glow
-  grad2.addColorStop(0.5, 'rgba(15, 23, 72, 0.16)');
-  grad2.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = grad2;
-  ctx.fillRect(0, 0, w, h);
-
-  // Draw noise grain overlay
-  ctx.fillStyle = noisePattern;
-  ctx.fillRect(0, 0, w, h);
-
-  requestAnimationFrame(draw);
-}
-draw();
-window.onresize = updateSize;
-</script>
-</body>
-</html>
-  `;
+  };
 
   const formatModelName = (modelId: string) => {
     if (modelId === 'deepseek-v4-flash-free') return 'DeepSeek Flash';
@@ -549,9 +418,16 @@ window.onresize = updateSize;
     let rawList: string[] = [];
     if (jwtToken.startsWith('mock-')) {
       rawList = [
-        'deepseek-v4-flash-free', 'deepseek-v4-flash', 'deepseek-v4-pro',
-        'gemini-2.5-flash', 'claude-3.5-sonnet',
-        'claude-opus-4-1', 'claude-opus-4-5', 'claude-opus-4-6', 'claude-opus-4-7', 'claude-opus-4-8'
+        'deepseek-v4-flash-free',
+        'deepseek-v4-flash',
+        'deepseek-v4-pro',
+        'gemini-2.5-flash',
+        'claude-3.5-sonnet',
+        'claude-opus-4-1',
+        'claude-opus-4-5',
+        'claude-opus-4-6',
+        'claude-opus-4-7',
+        'claude-opus-4-8',
       ];
     } else {
       try {
@@ -560,7 +436,7 @@ window.onresize = updateSize;
         });
         if (response.ok) {
           const data = await response.json();
-          rawList = Array.isArray(data) ? data : (data.models || []);
+          rawList = Array.isArray(data) ? data : data.models || [];
         }
       } catch (e) {
         console.error('Failed to fetch models from API', e);
@@ -570,1445 +446,115 @@ window.onresize = updateSize;
     if (rawList.length > 0) {
       setModels(rawList);
       if (!rawList.includes(activeModel)) {
-        const fallback = rawList.includes('deepseek-v4-flash-free') ? 'deepseek-v4-flash-free' : rawList[0];
+        const fallback = rawList.includes('deepseek-v4-flash-free')
+          ? 'deepseek-v4-flash-free'
+          : rawList[0];
         setActiveModel(fallback);
       }
     }
   }
 
-  async function loadSessions(url: string, jwtToken: string) {
-    try {
-      const response = await fetch(`${url}/sessions`, {
-        headers: { Authorization: `Bearer ${jwtToken}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setSessions(data);
+  useEffect(() => {
+    const checkAuth = async () => {
+      const storedToken = await storage.getToken();
+      const storedEmail = await storage.getEmail();
+      const storedUrl = await storage.getBackendUrl();
+
+      registerBackgroundTasks();
+
+      if (!storedToken) {
+        router.replace('/login');
+        return;
       }
-    } catch (e) {
-      console.error('Failed to load sessions', e);
-    }
-  }
 
-  async function loadProjects(url: string, jwtToken: string) {
-    setIsLoadingProjects(true);
-    try {
-      const response = await fetch(`${url}/projects`, {
-        headers: { Authorization: `Bearer ${jwtToken}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setProjects(data);
-      }
-    } catch (e) {
-      console.error('Failed to load projects', e);
-    } finally {
-      setIsLoadingProjects(false);
-    }
-  }
+      setToken(storedToken);
+      setEmail(storedEmail);
+      setBackendUrl(storedUrl);
 
-  const handleSaveProject = async (name: string, html: string, css: string, js: string, projectId: string | null = null) => {
-    if (token?.startsWith('mock-')) {
-      const newMockId = projectId || generateRandomId('mock-p');
-      const newProj = { id: newMockId, name, html, css, js };
-      setProjects((prev) => {
-        const filtered = prev.filter((p) => p.id !== newMockId);
-        return [newProj, ...filtered];
-      });
-      setPlaygroundProjectId(newMockId);
-      setPlaygroundProjectName(name);
-      return newMockId;
-    }
-
-    if (!token || !backendUrl) return null;
-    
-    // Clean and sanitise targetUrl
-    let targetUrl = backendUrl.trim().replace(/\/$/, '');
-    if (targetUrl.startsWith('http://') && targetUrl.includes('.hf.space')) {
-      targetUrl = targetUrl.replace('http://', 'https://');
-    }
-
-    try {
-      const response = await fetch(`${targetUrl}/projects`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name,
-          html,
-          css,
-          js,
-          project_id: projectId || null,
+      Animated.sequence([
+        Animated.timing(borderGlowAnim, {
+          toValue: 1,
+          duration: 1200,
+          useNativeDriver: Platform.OS !== 'web',
         }),
-      });
-      if (response.ok) {
-        const savedProj = await response.json();
-        setProjects((prev) => {
-          const filtered = prev.filter((p) => p.id !== savedProj.id);
-          return [savedProj, ...filtered];
-        });
-        setPlaygroundProjectId(savedProj.id);
-        setPlaygroundProjectName(savedProj.name);
-        return savedProj.id;
-      }
-    } catch (e) {
-      console.error('Failed to save project', e);
-      showAlert('Connection Warning', 'Unable to sync preview with the cloud. Running locally, Sir.');
-    }
-    return null;
-  };
-
-  const handleDeleteProject = async (projectId: string) => {
-    if (token?.startsWith('mock-')) {
-      setProjects((prev) => prev.filter((p) => p.id !== projectId));
-      if (playgroundProjectId === projectId) {
-        setPlaygroundHtml('<h1>No live preview compiled yet, Sir.</h1>');
-        setPlaygroundCss('');
-        setPlaygroundJs('');
-        setPlaygroundProjectName('New Live App');
-        setPlaygroundProjectId(null);
-      }
-      return;
-    }
-
-    if (!token || !backendUrl) return;
-    try {
-      const response = await fetch(`${backendUrl}/projects/${projectId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        setProjects((prev) => prev.filter((p) => p.id !== projectId));
-        if (playgroundProjectId === projectId) {
-          setPlaygroundHtml('<h1>No live preview compiled yet, Sir.</h1>');
-          setPlaygroundCss('');
-          setPlaygroundJs('');
-          setPlaygroundProjectName('New Live App');
-          setPlaygroundProjectId(null);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to delete project', e);
-      showAlert('Error', 'Failed to delete preview, Sir.');
-    }
-  };
-
-  const handleRenameProject = async (projectId: string, newName: string) => {
-    if (!newName.trim()) return;
-    if (token?.startsWith('mock-')) {
-      setProjects((prev) =>
-        prev.map((p) => (p.id === projectId ? { ...p, name: newName } : p))
-      );
-      if (playgroundProjectId === projectId) {
-        setPlaygroundProjectName(newName);
-      }
-      setProjectToRename(null);
-      return;
-    }
-
-    if (!token || !backendUrl) return;
-    const original = projectsRef.current.find((p) => p.id === projectId);
-    if (!original) return;
-
-    try {
-      const response = await fetch(`${backendUrl}/projects`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: newName,
-          html: original.html,
-          css: original.css,
-          js: original.js,
-          project_id: projectId,
+        Animated.timing(borderGlowAnim, {
+          toValue: 0.35,
+          duration: 800,
+          useNativeDriver: Platform.OS !== 'web',
         }),
-      });
-      if (response.ok) {
-        const savedProj = await response.json();
-        setProjects((prev) =>
-          prev.map((p) => (p.id === projectId ? savedProj : p))
-        );
-        if (playgroundProjectId === projectId) {
-          setPlaygroundProjectName(savedProj.name);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to rename project', e);
-      showAlert('Error', 'Failed to rename preview, Sir.');
-    } finally {
-      setProjectToRename(null);
-    }
-  };
+        Animated.timing(borderGlowAnim, {
+          toValue: 0.75,
+          duration: 800,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(borderGlowAnim, {
+          toValue: 0.22,
+          duration: 1500,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
 
-  const createNewSession = () => {
-    // If we're already on an empty/new chat, do nothing to prevent duplicate empty states
-    if (isNewChat && messages.length === 0 && !inputText.trim()) {
-      closeSidebar();
-      return;
-    }
+      fetchModels(storedUrl, storedToken);
 
-    setCurrentSessionId(null);
-    setMessages([]);
-    setIsNewChat(true);
-    setStreamingText('');
-    setContextPercent(0);
-    closeSidebar();
-
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-  };
-
-  const deleteSession = (sessionId: string) => {
-    const session = sessions.find((s) => s.id === sessionId);
-    if (session) {
-      setSessionToDelete({ id: session.id, name: session.name });
-    }
-  };
-
-  const executeDeleteSession = async (sessionId: string) => {
-    if (token?.startsWith('mock-')) {
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      if (currentSessionId === sessionId) {
-        setMessages([]);
-        setCurrentSessionId(null);
-        setIsNewChat(true);
-      }
-      return;
-    }
-
-    try {
-      const response = await fetch(`${backendUrl}/sessions/${sessionId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-        if (currentSessionId === sessionId) {
-          setMessages([]);
-          setCurrentSessionId(null);
-          setIsNewChat(true);
-        }
-      } else {
-        showAlert('Error', 'Failed to delete session, Sir.');
-      }
-    } catch (e) {
-      showAlert('Error', 'Failed to delete session, Sir.');
-    }
-  };
-
-  const handleRenameSession = async (sessionId: string, newName: string) => {
-    if (!newName.trim()) return;
-
-    if (token?.startsWith('mock-')) {
-      setSessions((prev) =>
-        prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s))
-      );
-      setEditingSessionId(null);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${backendUrl}/sessions/${sessionId}/rename?name=${encodeURIComponent(newName)}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s))
-        );
-      } else {
-        showAlert('Error', 'Failed to rename session, Sir.');
-      }
-    } catch (e) {
-      console.error(e);
-      showAlert('Error', 'Connection failure renaming session, Sir.');
-    } finally {
-      setEditingSessionId(null);
-    }
-  };
-
-  const selectSession = async (sessionId: string) => {
-    setLoading(true);
-    setMessages([]);
-    setStreamingText('');
-    setContextPercent(0);
-
-    if (token?.startsWith('mock-')) {
-      setCurrentSessionId(sessionId);
-      setIsNewChat(false);
-      setLoading(false);
-      closeSidebar();
-
-      if (sessionId === 'mock-1') {
-        const mockMsgs: ChatMessage[] = [
-          { id: '1', role: 'user', content: 'Build an interactive live preview app dashboard' },
+      if (storedToken.startsWith('mock-')) {
+        chatSessions.setSessions([
+          { id: 'mock-1', name: 'Mock Live Dashboard Preview', created_at: '2026-06-17' },
+          { id: 'mock-2', name: 'System Volume command log', created_at: '2026-06-17' },
+        ]);
+        playground.setProjects([
           {
-            id: '2',
-            role: 'assistant',
-            content: [
-              "Certainly, Sir. I have constructed a responsive live preview dashboard for you. You can slide open the Code Playground drawer on the right to view it live.",
-              "",
-              "```html",
-              "<!DOCTYPE html>",
-              "<html>",
-              "<head>",
-              "<style>",
-              "body { font-family: sans-serif; background: #090d16; color: #fff; padding: 20px; }",
-              ".card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; text-align: center; }",
-              "h1 { color: #3b82f6; }",
-              "button { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }",
-              "</style>",
-              "</head>",
-              "<body>",
-              "<div class='card'>",
-              "<h1>VoxKage Mobile Live Sandbox</h1>",
-              "<p>This is a live compiled application built by VoxKage, Sir.</p>",
-              '<button onclick=\'alert("Hello Sir!")\'>Trigger Interaction</button>',
-              "</div>",
-              "</body>",
-              "</html>",
-              "```"
-            ].join("\n"),
-          },
-        ];
-        setMessages(mockMsgs);
-        scanMessagesForPlayground(mockMsgs);
-      } else {
-        const mockMsgs: ChatMessage[] = [
-          { id: '1', role: 'user', content: 'Run git status on my laptop' },
-          {
-            id: '2',
-            role: 'laptop',
-            content: [
-              "[task-419] Executing command: git status",
-              "On branch main",
-              "Your branch is up to date with 'origin/main'.",
-              "",
-              "nothing to commit, working tree clean"
-            ].join("\n"),
-          },
-          { id: '3', role: 'assistant', content: 'The power shell execution completed, Sir. Your git repository working tree is clean with nothing to commit.' },
-        ];
-        setMessages(mockMsgs);
-      }
-      return;
-    }
-
-    try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const res = await fetch(`${backendUrl}/sessions/${sessionId}`, { headers });
-
-      if (res.ok) {
-        const data = await res.json();
-        setCurrentSessionId(sessionId);
-        setIsNewChat(false);
-
-        const formattedMsgs: ChatMessage[] = data.messages.map((m: any) => ({
-          id: m.id || `${Math.random()}`,
-          role: m.role,
-          content: m.content,
-        }));
-        setMessages(formattedMsgs);
-        scanMessagesForPlayground(formattedMsgs);
-        connectWebSocket(sessionId, token || '', backendUrl);
-      }
-    } catch (e) {
-      showAlert('Error', 'Failed to fetch session messages, Sir.');
-    } finally {
-      setLoading(false);
-      closeSidebar();
-    }
-  };
-
-  const connectWebSocket = (sessionId: string, jwtToken: string, url: string) => {
-    if (wsRef.current) wsRef.current.close();
-
-    const wsScheme = url.startsWith('https') ? 'wss' : 'ws';
-    const cleanBaseUrl = url.replace(/^(https?:\/\/)/, '').replace(/\/$/, '');
-    const wsUrl = `${wsScheme}://${cleanBaseUrl}/ws/chat/${sessionId}?token=${jwtToken}`;
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onerror = (err) => {
-      console.error("WebSocket Error, Sir:", err);
-    };
-
-    ws.onclose = (e) => {
-      console.log("WebSocket connection closed, Sir:", e);
-      if (wsRef.current === ws) {
-        wsRef.current = null;
-      }
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'token') {
-          updateStreamingText((prev) => prev + data.content);
-        } else if (data.type === 'context_sync') {
-          setContextPercent(data.percent);
-        } else if (data.type === 'compaction_progress') {
-          setCompactionProgress(data.progress);
-        } else if (data.type === 'proxy_completion_request') {
-          const { request_id, payload } = data;
-          
-          const runProxyQuery = async () => {
-            try {
-              const response = await fetch('https://opencode.ai/zen/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${payload.api_key}`
-                },
-                body: JSON.stringify({
-                  model: payload.model,
-                  messages: payload.messages,
-                  tools: payload.tools,
-                  tool_choice: payload.tool_choice,
-                  temperature: payload.temperature,
-                  stream: true
-                })
-              });
-
-              if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`HTTP ${response.status}: ${text}`);
-              }
-
-              if (response.body && typeof response.body.getReader === 'function') {
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-                let buffer = '';
-
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-
-                  buffer += decoder.decode(value, { stream: true });
-                  const lines = buffer.split('\n');
-                  buffer = lines.pop() || '';
-
-                  for (const line of lines) {
-                    const cleanLine = line.replace(/^data:\s*/, '').trim();
-                    if (!cleanLine) continue;
-                    if (cleanLine === '[DONE]') continue;
-
-                    try {
-                      const chunk = JSON.parse(cleanLine);
-                      const delta = chunk.choices?.[0]?.delta;
-                      if (delta) {
-                        ws.send(JSON.stringify({
-                          type: 'proxy_completion_chunk',
-                          request_id,
-                          delta
-                        }));
-                      }
-                    } catch (e) {
-                      // skip parsing errors on partial chunks
-                    }
-                  }
-                }
-              } else {
-                // Fallback for native mobile platforms that don't support fetch streams
-                const resJson = await response.json();
-                const content = resJson.choices?.[0]?.message?.content || '';
-                const toolCalls = resJson.choices?.[0]?.message?.tool_calls;
-                ws.send(JSON.stringify({
-                  type: 'proxy_completion_chunk',
-                  request_id,
-                  delta: { content, tool_calls: toolCalls }
-                }));
-              }
-
-              ws.send(JSON.stringify({
-                type: 'proxy_completion_done',
-                request_id
-              }));
-
-            } catch (err: any) {
-              console.error('[-] Proxy completions execution failed:', err);
-              ws.send(JSON.stringify({
-                type: 'proxy_completion_error',
-                request_id,
-                error: err?.message || String(err)
-              }));
-            }
-          };
-
-          runProxyQuery();
-        } else if (data.type === 'mobile_tool_call') {
-          const { request_id, tool_name, arguments: toolArgs } = data;
-          const runMobileTool = async () => {
-            try {
-              const result = await executeMobileTool(tool_name, toolArgs);
-              ws.send(JSON.stringify({
-                type: 'mobile_tool_response',
-                request_id,
-                status: 'success',
-                result
-              }));
-            } catch (err: any) {
-              console.error('[-] Mobile tool execution failed:', err);
-              ws.send(JSON.stringify({
-                type: 'mobile_tool_response',
-                request_id,
-                status: 'error',
-                result: err?.message || String(err)
-              }));
-            }
-          };
-          runMobileTool();
-        } else if (data.type === 'error') {
-          setCompactionProgress(null);
-          let errorMsg = data.content;
-          if (errorMsg && errorMsg.includes('Upstream error:')) {
-            try {
-              const rawJson = errorMsg.substring(errorMsg.indexOf('Upstream error:') + 'Upstream error:'.length).trim();
-              const parsed = JSON.parse(rawJson);
-              if (parsed?.error?.message) {
-                errorMsg = parsed.error.message;
-              }
-            } catch (e) {
-              // fallback to raw string
-            }
-          }
-          showAlert('Engine Error, Sir', errorMsg);
-          setLoading(false);
-          setThinkingStatus(null);
-          updateStreamingText('');
-        } else if (data.type === 'hud_log') {
-          setThinkingStatus(data.content);
-        } else if (data.type === 'laptop_log') {
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === 'laptop') {
-              return [
-                ...prev.slice(0, -1),
-                { ...last, content: last.content + '\n' + data.content },
-              ];
-            } else {
-              return [
-                ...prev,
-                { id: generateRandomId('log'), role: 'laptop' as const, content: data.content },
-              ];
-            }
-          });
-        } else if (data.type === 'rename') {
-          setSessions((prev) =>
-            prev.map((s) => (s.id === sessionId ? { ...s, name: data.name } : s))
-          );
-        } else if (data.type === 'tool_plan') {
-          setWorkflowNodes(data.nodes || []);
-        } else if (data.type === 'tool_start') {
-          setWorkflowNodes((prev) =>
-            prev.map((n) => (n.id === data.node_id ? { ...n, status: 'running' } : n))
-          );
-        } else if (data.type === 'tool_success') {
-          setWorkflowNodes((prev) =>
-            prev.map((n) => (n.id === data.node_id ? { ...n, status: 'success' } : n))
-          );
-        } else if (data.type === 'tool_failed') {
-          setWorkflowNodes((prev) =>
-            prev.map((n) => (n.id === data.node_id ? { ...n, status: 'failed' } : n))
-          );
-        } else if (data.type === 'agent_thought') {
-          const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          setThinkingLogs((prev) => [...prev, `[${timestamp}] ${data.content}`]);
-        } else if (data.type === 'tool_confirm_request') {
-          setConfirmationToolName(data.tool_name);
-          setConfirmationToolLabel(data.label || data.tool_name);
-          setConfirmationRequestId(data.request_id);
-        } else if (data.type === 'done') {
-          setCompactionProgress(null);
-          const associatedProjectId = data.project_id || null;
-          const currText = streamingTextRef.current;
-          updateStreamingText('');
-
-          if (currText.trim()) {
-            const assistantMessageId = generateRandomId('assistant');
-            const editingId = associatedProjectId || activeEditingProjectIdRef.current;
-            
-            if (editingId) {
-              setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
-            }
-
-            setMessages((prev) => {
-              const updated = [
-                ...prev,
-                { id: assistantMessageId, role: 'assistant' as const, content: currText },
-              ];
-              scanMessagesForPlayground(updated);
-
-              // Auto-save code block updates to the active editing project if refining
-              if (editingId) {
-                const htmlMatch = currText.match(/```html\n([\s\S]*?)```/i);
-                const cssMatch = currText.match(/```css\n([\s\S]*?)```/i);
-                const jsMatch = currText.match(/```javascript\n([\s\S]*?)```/i) || currText.match(/```js\n([\s\S]*?)```/i);
-                
-                if (htmlMatch || cssMatch || jsMatch) {
-                  const htmlCode = htmlMatch ? htmlMatch[1] : '';
-                  const cssCode = cssMatch ? cssMatch[1] : '';
-                  const jsCode = jsMatch ? jsMatch[1] : '';
-                  
-                  const originalProj = projectsRef.current.find(p => p.id === editingId);
-                  if (originalProj) {
-                    const finalHtml = htmlCode || originalProj.html || '';
-                    const finalCss = cssCode || originalProj.css || '';
-                    const finalJs = jsCode || originalProj.js || '';
-                    
-                    setPlaygroundHtml(finalHtml);
-                    setPlaygroundCss(finalCss);
-                    setPlaygroundJs(finalJs);
-                    setPlaygroundRevision((prev) => prev + 1);
-
-                    handleSaveProject(
-                      originalProj.name,
-                      finalHtml,
-                      finalCss,
-                      finalJs,
-                      editingId
-                    );
-                  }
-                }
-              }
-
-              return updated;
-            });
-          }
-          if (associatedProjectId) {
-            loadProjects(backendUrl, token || '');
-          }
-          setLoading(false);
-          setThinkingStatus(null);
-        }
-      } catch (e) {
-        console.error('Socket message parse error', e);
-      }
-    };
-  };
-
-  const handleStopGeneration = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-
-    const currText = streamingTextRef.current;
-    updateStreamingText('');
-
-    if (currText.trim()) {
-      const assistantMessageId = generateRandomId('assistant');
-      const stoppedContent = currText + '\n\n*[Generation stopped, Sir.]*';
-      
-      const editingId = activeEditingProjectIdRef.current;
-      if (editingId) {
-        setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
-      }
-
-      setMessages((prev) => {
-        const updated = [
-          ...prev,
-          { id: assistantMessageId, role: 'assistant' as const, content: stoppedContent },
-        ];
-        scanMessagesForPlayground(updated);
-        return updated;
-      });
-    }
-
-    setLoading(false);
-    setThinkingStatus(null);
-  };
-
-  const scanMessagesForPlayground = (msgList: ChatMessage[]) => {
-    let htmlCode = '';
-    let cssCode = '';
-    let jsCode = '';
-
-    for (const msg of msgList) {
-      if (msg.role !== 'assistant') continue;
-      const htmlMatch = msg.content.match(/```html\n([\s\S]*?)```/);
-      const cssMatch = msg.content.match(/```css\n([\s\S]*?)```/);
-      const jsMatch = msg.content.match(/```javascript\n([\s\S]*?)```/) || msg.content.match(/```js\n([\s\S]*?)```/);
-
-      if (htmlMatch) htmlCode = htmlMatch[1];
-      if (cssMatch) cssCode = cssMatch[1];
-      if (jsMatch) jsCode = jsMatch[1];
-    }
-
-    if (htmlCode || cssCode || jsCode) {
-      setPlaygroundHtml(htmlCode || '<h1>Live Preview</h1>');
-      setPlaygroundCss(cssCode || '');
-      setPlaygroundJs(jsCode || '');
-      setPlaygroundProjectName('Live Preview Sandbox');
-      setPlaygroundRevision((prev) => prev + 1);
-    }
-  };
-
-  const handleOpenCodeInPlayground = async (content: string, messageId: string) => {
-    const existingProjectId = messageProjectIds[messageId] || null;
-    
-    if (existingProjectId) {
-      let p = projectsRef.current.find(proj => proj.id === existingProjectId);
-      if (!p && token && backendUrl) {
-        try {
-          const response = await fetch(`${backendUrl}/projects/${existingProjectId}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (response.ok) {
-            p = await response.json();
-            setProjects(prev => [p, ...prev.filter(proj => proj.id !== existingProjectId)]);
-          }
-        } catch (e) {
-          console.error("Failed to fetch project directly", e);
-        }
-      }
-      if (p) {
-        setPlaygroundHtml(p.html || '');
-        setPlaygroundCss(p.css || '');
-        setPlaygroundJs(p.js || '');
-        setPlaygroundProjectName(p.name || 'Untitled App');
-        setPlaygroundProjectId(p.id);
-        setPlaygroundView('preview');
-        setPlaygroundRevision((prev) => prev + 1);
-        openPlayground();
-        return;
-      }
-    }
-
-    const htmlMatch = content.match(/```html\n([\s\S]*?)```/i);
-    const cssMatch = content.match(/```css\n([\s\S]*?)```/i);
-    const jsMatch = content.match(/```javascript\n([\s\S]*?)```/i) || content.match(/```js\n([\s\S]*?)```/i);
-
-    if (!htmlMatch && !cssMatch && !jsMatch) {
-      return;
-    }
-
-    const htmlCode = htmlMatch ? htmlMatch[1] : '<h1>Live Preview</h1>';
-    const cssCode = cssMatch ? cssMatch[1] : '';
-    const jsCode = jsMatch ? jsMatch[1] : '';
-
-    setPlaygroundHtml(htmlCode);
-    setPlaygroundCss(cssCode);
-    setPlaygroundJs(jsCode);
-    setPlaygroundRevision((prev) => prev + 1);
-
-    const session = sessions.find((s) => s.id === currentSessionId);
-    const projName = session ? `Playground - ${session.name}` : 'Playground Preview';
-    setPlaygroundProjectName(projName);
-
-    const savedId = await handleSaveProject(projName, htmlCode, cssCode, jsCode, existingProjectId);
-    if (savedId) {
-      setPlaygroundProjectId(savedId);
-      setPlaygroundView('preview');
-      openPlayground();
-      loadProjects(backendUrl, token || '');
-      if (!existingProjectId) {
-        setMessageProjectIds((prev) => ({ ...prev, [messageId]: savedId }));
-      }
-    }
-    setPlaygroundView('preview');
-    openPlayground();
-  };
-
-  const handleKeyPress = (e: any) => {
-    if (showCommandPopup && filteredCommands.length > 0) {
-      const key = e.nativeEvent.key;
-      if (key === 'ArrowDown') {
-        setCommandPopupActiveIndex(prev => (prev + 1) % filteredCommands.length);
-      } else if (key === 'ArrowUp') {
-        setCommandPopupActiveIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
-      } else if (key === 'Enter') {
-        const activeCmd = filteredCommands[commandPopupActiveIndex];
-        if (activeCmd) {
-          setInputText(activeCmd.name + ' ');
-          setShowCommandPopup(false);
-        }
-      }
-    }
-  };
-
-  const handleDrillAnswer = (answer: string) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const clientTimeStr = new Date().toLocaleString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
-      });
-      const payload = JSON.stringify({
-        message: answer,
-        model: activeModel,
-        variant: VARIANTS[activeVariantIndex],
-        client_time: clientTimeStr,
-        active_project: null
-      });
-      wsRef.current.send(payload);
-      setMessages((prev) => [
-        ...prev,
-        { id: generateRandomId('user'), role: 'user', content: answer },
-      ]);
-      setLoading(true);
-      setStreamingText('');
-      setThinkingStatus('VoxKage is processing, Sir...');
-    }
-  };
-
-  const handleSendMessage = async (overrideText?: string) => {
-    const textToUse = typeof overrideText === 'string' ? overrideText : undefined;
-    const userQuery = textToUse !== undefined ? textToUse.trim() : inputText.trim();
-    if (!userQuery && !stagedAttachment) return;
-
-    setWorkflowNodes([]);
-    setThinkingLogs([]);
-    setConfirmationToolName(null);
-    setConfirmationToolLabel(null);
-    setConfirmationRequestId(null);
-
-    wasLastInputVoice.current = textToUse !== undefined;
-
-    // Check if side-channel (/btw) is active or initiated
-    if (showBtwOverlay || userQuery.startsWith('/btw')) {
-      const isInitial = !showBtwOverlay;
-      setInputText('');
-      setStagedAttachment(null);
-      setShowBtwOverlay(true);
-      setBtwLoading(true);
-
-      const prompt = isInitial && userQuery.startsWith('/btw') ? userQuery : userQuery;
-      const updatedMessages = [...(isInitial ? [] : btwMessages), { role: 'user', content: prompt }];
-      setBtwMessages(updatedMessages);
-
-      if (token?.startsWith('mock-')) {
-        setTimeout(() => {
-          setBtwMessages(prev => [...prev, { role: 'assistant', content: 'Certainly, Sir. This is a side-channel reply in mock mode. I can answer quick doubts here.' }]);
-          setBtwLoading(false);
-        }, 800);
-        return;
-      }
-
-      try {
-        const response = await fetch(`${backendUrl.trim().replace(/\/$/, '')}/chat/btw`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ messages: updatedMessages })
-        });
-        if (response.ok) {
-          const resData = await response.json();
-          setBtwMessages(prev => [...prev, { role: 'assistant', content: resData.response }]);
-        } else {
-          setBtwMessages(prev => [...prev, { role: 'assistant', content: '[Error querying side-channel, Sir.]' }]);
-        }
-      } catch (err: any) {
-        setBtwMessages(prev => [...prev, { role: 'assistant', content: `[Error: ${err.message}]` }]);
-      } finally {
-        setBtwLoading(false);
-      }
-      return;
-    }
-
-    const staged = stagedAttachment;
-
-    if (token?.startsWith('mock-')) {
-      let targetSessionId = currentSessionId;
-      if (!targetSessionId) {
-        const newMockId = generateRandomId('mock');
-        const newMockSession: ChatSession = {
-          id: newMockId,
-          name: 'New Chat',
-          created_at: '2026-06-17',
-        };
-        setSessions((prev) => [newMockSession, ...prev]);
-        setCurrentSessionId(newMockId);
-        targetSessionId = newMockId;
-      }
-
-      let displayMsg = userQuery;
-      if (staged) {
-        displayMsg = userQuery 
-          ? `${userQuery}\n\n📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`
-          : `📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`;
-      }
-      
-      setInputText('');
-      setStagedAttachment(null);
-      setLoading(true);
-      setIsNewChat(false);
-      setMessages((prev) => [
-        ...prev,
-        { id: generateRandomId('user'), role: 'user', content: displayMsg },
-      ]);
-      setStreamingText('');
-
-      setTimeout(() => {
-        let isCodeQuery = /dashboard|html|website|page/i.test(userQuery);
-        let isCmdQuery = /run|git|sys/i.test(userQuery);
-        
-        let responseTemplate = `Certainly, Sir. I am online in Simulation Mode. Let me know what you need.`;
-        if (staged) {
-          responseTemplate = `Certainly, Sir. I see the attached ${staged.type} '${staged.name}'. I have indexed its content in Supabase. How can I help you with it?`;
-        } else if (isCodeQuery) {
-          responseTemplate = [
-            "Certainly, Sir. I have constructed an interactive live preview app dashboard for you. You can slide open the Code Playground drawer on the right to view it live.",
-            "",
-            "```html",
-            "<!DOCTYPE html>",
-            "<html>",
-            "<head>",
-            "<style>",
-            "body { font-family: sans-serif; background: #090d16; color: #fff; padding: 20px; }",
-            ".card { background: #171717; border: 1px solid #262626; border-radius: 12px; padding: 24px; text-align: center; }",
-            "h1 { color: #3b82f6; }",
-            "button { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }",
-            "</style>",
-            "</head>",
-            "<body>",
-            "<div class='card'>",
-            "<h1>VoxKage Mobile Live Sandbox</h1>",
-            "<p>This is a live compiled application built by VoxKage, Sir.</p>",
-            '<button onclick=\'alert("Hello Sir!")\'>Trigger Interaction</button>',
-            "</div>",
-            "</body>",
-            "</html>",
-            "```"
-          ].join("\n");
-        } else if (isCmdQuery) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `log-${Math.random()}`,
-              role: 'laptop' as const,
-              content: [
-                `[task-419] Executing command: ${userQuery}`,
-                "On branch main",
-                "Your branch is up to date with 'origin/main'.",
-                "",
-                "nothing to commit, working tree clean"
-              ].join("\n")
-            }
-          ]);
-          responseTemplate = `The power shell command execution completed, Sir. Working tree is clean.`;
-        }
-
-        let words = responseTemplate.split(' ');
-        let currentIdx = 0;
-        const interval = setInterval(() => {
-          if (currentIdx < words.length) {
-            setStreamingText((prev) => prev + (currentIdx === 0 ? '' : ' ') + words[currentIdx]);
-            currentIdx++;
-          } else {
-            clearInterval(interval);
-            setStreamingText((currText) => {
-              setMessages((prev) => {
-                const updated = [
-                  ...prev,
-                  { id: `assistant-${Math.random()}`, role: 'assistant' as const, content: currText }
-                ];
-                scanMessagesForPlayground(updated);
-                return updated;
-              });
-              return '';
-            });
-            setLoading(false);
-          }
-        }, 80);
-      }, 1000);
-      return;
-    }
-
-    let targetSessionId = currentSessionId;
-    if (!targetSessionId) {
-      if (!token || !backendUrl) return;
-      try {
-        const response = await fetch(`${backendUrl}/sessions?name=New Chat`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (response.ok) {
-          const session = await response.json();
-          setSessions((prev) => [session, ...prev]);
-          targetSessionId = session.id;
-          setCurrentSessionId(session.id);
-          setIsNewChat(false);
-          connectWebSocket(session.id, token, backendUrl);
-        } else {
-          showAlert('Error', 'Failed to initialize session.');
-          return;
-        }
-      } catch (e) {
-        showAlert('Error', 'Could not initialize session.');
-        return;
-      }
-    }
-
-    let uploadedDocId: string | null = null;
-
-    if (staged && (staged.type === 'document' || staged.type === 'image')) {
-      setUploadingFile(true);
-      setThinkingStatus(`Uploading and indexing ${staged.type}, Sir...`);
-      
-      try {
-        const uploadUrl = `${backendUrl}/rag/upload`;
-        const mimeType = staged.mimeType || (staged.type === 'image' ? 'image/jpeg' : 'application/octet-stream');
-        const uploadRes = await performUpload(uploadUrl, staged.uri, staged.name, mimeType, token || '', activeModel);
-        uploadedDocId = uploadRes.document_id;
-        
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: generateRandomId('system'),
-            role: 'laptop',
-            content: `📄 Document indexed: ${staged.name}\nVector RAG version has been stored.`,
+            id: 'mock-p1',
+            name: 'Todo App responsive preview',
+            html: '<h1>Todo App responsive preview</h1>',
+            css: '',
+            js: '',
           },
         ]);
-      } catch (err: any) {
-        showAlert('Upload Error', `Failed to upload document: ${err.message}`);
-        setUploadingFile(false);
-        return;
-      } finally {
-        setUploadingFile(false);
+      } else {
+        chatSessions.loadSessions(storedUrl, storedToken);
+        playground.loadProjects(storedUrl, storedToken);
       }
-    }
-
-    let displayMsg = userQuery;
-    if (staged) {
-      displayMsg = userQuery 
-        ? `${userQuery}\n\n📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`
-        : `📎 Attached ${staged.type === 'image' ? 'Image' : 'Document'}: ${staged.name}`;
-    }
-
-    const activeProject = activeEditingProjectId 
-      ? projectsRef.current.find(p => p.id === activeEditingProjectId) 
-      : null;
-
-    // Generate current local date/time string on client to bypass server timezone issues
-    const clientTimeStr = new Date().toLocaleString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true
-    });
-
-    setMessages((prev) => [
-      ...prev,
-      { id: generateRandomId('user'), role: 'user', content: displayMsg },
-    ]);
-    setInputText('');
-    setStagedAttachment(null);
-    setLoading(true);
-    setStreamingText('');
-    setThinkingStatus('Connecting to VoxKage core, Sir...');
-
-    const constructPayload = () => {
-      return JSON.stringify({
-        message: displayMsg,
-        model: activeModel,
-        variant: VARIANTS[activeVariantIndex],
-        client_time: clientTimeStr,
-        active_project: activeProject ? {
-          id: activeProject.id,
-          name: activeProject.name,
-          html: activeProject.html,
-          css: activeProject.css,
-          js: activeProject.js
-        } : null,
-        document_id: uploadedDocId || undefined,
-        image: undefined,
-      });
     };
+    checkAuth();
+  }, []);
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(constructPayload());
-    } else {
-      // Connect only if there is no socket or if it's closed/closing
-      if (!wsRef.current || (wsRef.current.readyState !== WebSocket.OPEN && wsRef.current.readyState !== WebSocket.CONNECTING)) {
-        connectWebSocket(targetSessionId || '', token || '', backendUrl);
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
       }
-      
-      // Poll connection status until open or timeout (25s to allow HF Space wake up)
-      let checks = 0;
-      const maxChecks = 125; // 125 * 200ms = 25000ms
-      const interval = setInterval(() => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          clearInterval(interval);
-          setThinkingStatus('VoxKage is processing, Sir...');
-          wsRef.current.send(constructPayload());
-        } else {
-          checks++;
-          if (checks % 15 === 0) {
-            setThinkingStatus('Waking up cloud engine, Sir... Please stand by.');
-          }
-          if (checks >= maxChecks) {
-            clearInterval(interval);
-            showAlert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
-            setLoading(false);
-            setThinkingStatus(null);
-          }
-        }
-      }, 200);
-    }
-  };
+    };
+  }, []);
 
-  const handleRetryMessage = async (message: ChatMessage, index: number) => {
-    let userMsgIndex = -1;
-    for (let i = index - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') {
-        userMsgIndex = i;
-        break;
-      }
-    }
+  useEffect(() => {
+    if (inputText.startsWith('/')) {
+      const lowerInput = inputText.toLowerCase();
 
-    if (userMsgIndex === -1) {
-      console.log('[-] Retry failed: No preceding user message found, Sir.');
-      return;
-    }
+      const hasExactCommand = COMMANDS.some(
+        (cmd) => lowerInput === cmd.name.toLowerCase() || lowerInput.startsWith(cmd.name.toLowerCase() + ' ')
+      );
 
-    const previousUserQuery = messages[userMsgIndex].content;
-
-    // Send delete/retry command to WebSocket first to clean up DB
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'chat_retry',
-        index: userMsgIndex
-      }));
-    }
-
-    // Truncate local chat history
-    setMessages(messages.slice(0, userMsgIndex));
-
-    // Resubmit query
-    await handleSendMessage(previousUserQuery);
-  };
-
-  const sendConfirmationResponse = (confirm: boolean, alwaysAllow: boolean) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && confirmationRequestId) {
-      wsRef.current.send(JSON.stringify({
-        type: 'tool_confirm_response',
-        request_id: confirmationRequestId,
-        confirm,
-        always_allow: alwaysAllow,
-        tool_name: confirmationToolName,
-      }));
-      setConfirmationToolName(null);
-      setConfirmationToolLabel(null);
-      setConfirmationRequestId(null);
-    }
-  };
-
-  const handleCameraPress = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permissionResult.granted) {
-        showAlert('Permission Denied', 'Camera permission is required to take photos, Sir.');
-        return;
-      }
-      
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images'] as any,
-        allowsEditing: true,
-        quality: 0.8,
-        base64: true,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        const fileSize = asset.fileSize || 0;
-        if (fileSize > 50 * 1024 * 1024) {
-          showAlert('File Too Large', 'Selected image exceeds the 50MB size limit, Sir.');
-          return;
-        }
-        
-        setStagedAttachment({
-          uri: asset.uri,
-          name: asset.fileName || 'camera_photo.jpg',
-          type: 'image',
-          size: fileSize,
-          base64: asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : undefined,
-          mimeType: asset.mimeType || 'image/jpeg',
-        });
-      }
-    } catch (e: any) {
-      showAlert('Error', `Failed to open camera: ${e.message}`);
-    }
-  };
-
-  const handlePhotosPress = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permissionResult.granted) {
-        showAlert('Permission Denied', 'Photos permission is required to pick images, Sir.');
+      if (hasExactCommand) {
+        setShowCommandPopup(false);
         return;
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'] as any,
-        allowsEditing: true,
-        quality: 0.8,
-        base64: true,
-      });
+      const matches = COMMANDS.filter((cmd) => cmd.name.toLowerCase().startsWith(lowerInput));
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        const fileSize = asset.fileSize || 0;
-        if (fileSize > 50 * 1024 * 1024) {
-          showAlert('File Too Large', 'Selected image exceeds the 50MB size limit, Sir.');
-          return;
-        }
-
-        setStagedAttachment({
-          uri: asset.uri,
-          name: asset.fileName || 'gallery_photo.jpg',
-          type: 'image',
-          size: fileSize,
-          base64: asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : undefined,
-          mimeType: asset.mimeType || 'image/jpeg',
-        });
-      }
-    } catch (e: any) {
-      showAlert('Error', `Failed to open photo library: ${e.message}`);
-    }
-  };
-
-  const handleFilesPress = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        copyToCacheDirectory: true,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        const fileSize = asset.size || 0;
-        
-        if (fileSize > 50 * 1024 * 1024) {
-          showAlert('File Too Large', 'Selected document exceeds the 50MB size limit, Sir.');
-          return;
-        }
-
-        setStagedAttachment({
-          uri: asset.uri,
-          name: asset.name,
-          type: 'document',
-          size: fileSize,
-          mimeType: asset.mimeType || undefined,
-        });
-      }
-    } catch (e: any) {
-      showAlert('Error', `Failed to select document: ${e.message}`);
-    }
-  };
-
-  const handleFileUpload = async () => {
-    if (token?.startsWith('mock-')) {
-      setMessages((prev) => [
-        ...prev,
-        { id: generateRandomId('mock-file'), role: 'laptop', content: '📄 Document indexed: AyushResume.pdf\nVector RAG version has been stored.' }
-      ]);
-      showAlert('Mock Indexed', 'Simulator Mode: Document successfully indexed.');
-      return;
-    }
-
-    if (!token || !backendUrl) return;
-
-    try {
-      const pickerResult = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        copyToCacheDirectory: true,
-      });
-
-      if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
-        return;
-      }
-
-      const fileAsset = pickerResult.assets[0];
-      setUploadingFile(true);
-
-      try {
-        const uploadUrl = `${backendUrl}/upload`;
-        const mimeType = fileAsset.mimeType || 'application/octet-stream';
-        const uploadRes = await performUpload(uploadUrl, fileAsset.uri, fileAsset.name, mimeType, token || '', activeModel);
-        
-        showAlert(
-          'Upload Successful',
-          `Document '${fileAsset.name}' was successfully uploaded and indexed into Supabase RAG memory, Sir.`
-        );
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `system-${Math.random()}`,
-            role: 'laptop',
-            content: `📄 Document indexed: ${fileAsset.name}\nVector RAG version has been stored.`,
-          },
-        ]);
-      } catch (err: any) {
-        showAlert('Upload Failed', err.message || 'Failed to process document, Sir.');
-      } finally {
-        setUploadingFile(false);
-      }
-    } catch (e: any) {
-      showAlert('Error', `Document upload failed: ${e.message}`);
-    } finally {
-      setUploadingFile(false);
-    }
-  };
-
-  const transcribeAudio = async (uri: string) => {
-    setThinkingStatus('Transcribing voice prompt, Sir...');
-    setLoading(true);
-    try {
-      const url = `${backendUrl}/voice/transcribe`;
-      const mimeType = 'audio/m4a';
-      const res = await performUpload(url, uri, 'voice_input.m4a', mimeType, token || '');
-      if (res && res.text) {
-        setInputText(res.text);
-        // Automatically submit the message
-        handleSendMessage(res.text);
-      }
-    } catch (e: any) {
-      showAlert('Voice Transcription Failed', `Failed to transcribe: ${e.message}`);
-    } finally {
-      setLoading(false);
-      setThinkingStatus(null);
-    }
-  };
-
-  const handleVoicePress = async () => {
-    if (!Audio) {
-      showAlert('Voice Recording Unavailable', 'Microphone/Audio recording is not supported in this client. The expo-av module could not be loaded, Sir.');
-      return;
-    }
-    if (!isVoiceActive) {
-      try {
-        const { granted } = await Audio.requestPermissionsAsync();
-        if (!granted) {
-          showAlert('Permission Denied', 'Microphone permission is required to record voice commands, Sir.');
-          return;
-        }
-        
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
-
-        setIsVoiceActive(true);
-        setMicVolume(0.1);
-
-        const { recording } = await Audio.Recording.createAsync(
-          {
-            isMeteringEnabled: true,
-            android: {
-              extension: '.m4a',
-              outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-              audioEncoder: Audio.AndroidAudioEncoder.AAC,
-              sampleRate: 16000,
-              numberOfChannels: 1,
-              bitRate: 64000,
-            },
-            ios: {
-              extension: '.m4a',
-              outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-              audioQuality: Audio.IOSAudioQuality.MEDIUM,
-              sampleRate: 16000,
-              numberOfChannels: 1,
-              bitRate: 64000,
-            },
-            web: {},
-          },
-          (status: any) => {
-            if (status.metering !== undefined) {
-              const db = status.metering || -160;
-              const normalized = Math.max(-60, Math.min(0, db));
-              const vol = (normalized + 60) / 60;
-              setMicVolume(vol);
-            }
-          },
-          80
-        );
-        recordingRef.current = recording;
-      } catch (err: any) {
-        showAlert('Microphone Error', `Failed to start recording: ${err.message}`);
-        setIsVoiceActive(false);
+      if (matches.length > 0) {
+        setShowCommandPopup(true);
+        setCommandPopupActiveIndex((prev) => (prev >= matches.length ? 0 : prev));
+      } else {
+        setShowCommandPopup(false);
       }
     } else {
-      setIsVoiceActive(false);
-      const recording = recordingRef.current;
-      if (recording) {
-        recordingRef.current = null;
-        try {
-          await recording.stopAndUnloadAsync();
-          const uri = recording.getURI();
-          if (uri) {
-            await transcribeAudio(uri);
-          }
-        } catch (err: any) {
-          console.error('Error stopping audio recording:', err);
-        }
-      }
+      setShowCommandPopup(false);
     }
-  };
+  }, [inputText]);
 
-  const openSidebar = () => {
-    setIsSidebarOpen(true);
-    Animated.timing(sidebarAnim, {
-      toValue: 0,
-      duration: 220,
-      useNativeDriver: false,
-    }).start();
-  };
-
-  const closeSidebar = () => {
-    Animated.timing(sidebarAnim, {
-      toValue: -280,
-      duration: 200,
-      useNativeDriver: false,
-    }).start(() => setIsSidebarOpen(false));
-  };
-
-  const openPlayground = () => {
-    if (token && backendUrl) {
-      loadProjects(backendUrl, token);
-    }
-    setIsPlaygroundOpen(true);
-    Animated.timing(playgroundAnim, {
-      toValue: 0,
-      duration: 250,
-      useNativeDriver: false,
-    }).start();
-  };
-
-  const closePlayground = () => {
-    Animated.timing(playgroundAnim, {
-      toValue: drawerWidth,
-      duration: 220,
-      useNativeDriver: false,
-    }).start(() => setIsPlaygroundOpen(false));
-  };
-
-  const handleLogout = async () => {
-    await storage.clearAuth();
-    if (wsRef.current) wsRef.current.close();
-    router.replace('/login');
-  };
+  const filteredCommands = inputText.startsWith('/')
+    ? COMMANDS.filter((cmd) => cmd.name.toLowerCase().startsWith(inputText.toLowerCase()))
+    : [];
 
   const compileSandboxHTML = () => {
     return `
@@ -2025,12 +571,12 @@ window.onresize = updateSize;
               background-color: #0d0d0d;
               margin: 0;
             }
-            ${playgroundCss}
+            ${playground.playgroundCss}
           </style>
         </head>
         <body>
-          ${playgroundHtml}
-          <script>${playgroundJs}</script>
+          ${playground.playgroundHtml}
+          <script>${playground.playgroundJs}</script>
         </body>
       </html>
     `;
@@ -2041,7 +587,9 @@ window.onresize = updateSize;
   return (
     <View style={styles.container}>
       {Platform.OS === 'web' && (
-        <style dangerouslySetInnerHTML={{ __html: `
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
           *::-webkit-scrollbar {
             display: none !important;
           }
@@ -2049,48 +597,13 @@ window.onresize = updateSize;
             -ms-overflow-style: none !important;
             scrollbar-width: none !important;
           }
-        `}} />
-      )}
-      {/* Fluid WebGL-style animated wavy background */}
-      {Platform.OS === 'web' ? (
-        // @ts-ignore
-        <iframe
-          srcDoc={fluidBackgroundHTML}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            border: 'none',
-            width: '100%',
-            height: '100%',
-            zIndex: 0,
-            pointerEvents: 'none',
+        `,
           }}
-          title="Fluid Background Shader"
         />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, { zIndex: 0 }]}>
-          <WebView
-            source={{ html: fluidBackgroundHTML }}
-            originWhitelist={['*']}
-            style={{ flex: 1, backgroundColor: '#000000' }}
-            scrollEnabled={false}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
-            androidLayerType="hardware"
-            allowsInlineMediaPlayback={true}
-            startInLoadingState={false}
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-            overScrollMode="never"
-            setBuiltInZoomControls={false}
-            setDisplayZoomControls={false}
-            bounces={false}
-          />
-        </View>
       )}
+
+      {/* Fluid WebGL-style animated wavy background */}
+      <FluidBackground />
 
       {/* Border Lit Up Entrance Animation Overlay */}
       <Animated.View
@@ -2125,7 +638,7 @@ window.onresize = updateSize;
               : sessions.find((s) => s.id === currentSessionId)?.name || 'Active Session'}
           </Text>
 
-          <TouchableOpacity onPress={createNewSession} style={styles.navButton}>
+          <TouchableOpacity onPress={chatSessions.createNewSession} style={styles.navButton}>
             <Ionicons name="add-outline" size={22} color="#9ca3af" />
           </TouchableOpacity>
         </View>
@@ -2140,16 +653,25 @@ window.onresize = updateSize;
             streamingText={streamingText}
             loading={loading}
             thinkingStatus={thinkingStatus}
-            handleOpenCodeInPlayground={handleOpenCodeInPlayground}
-            messageProjectIds={messageProjectIds}
-            onDrillAnswer={handleDrillAnswer}
-            onRetry={handleRetryMessage}
-            workflowNodes={workflowNodes}
-            thinkingLogs={thinkingLogs}
-            onOpenThinkingDrawer={() => setIsThinkingDrawerOpen(true)}
-            confirmationToolName={confirmationToolName}
-            confirmationToolLabel={confirmationToolLabel}
-            onSendConfirmationResponse={sendConfirmationResponse}
+            handleOpenCodeInPlayground={(content, msgId) => 
+              playground.handleOpenCodeInPlayground(
+                content,
+                msgId,
+                chatSessions.sessions,
+                chatSessions.currentSessionId,
+                webSocket.messageProjectIds,
+                webSocket.setMessageProjectIds
+              )
+            }
+            messageProjectIds={webSocket.messageProjectIds}
+            onDrillAnswer={webSocket.handleDrillAnswer}
+            onRetry={webSocket.handleRetryMessage}
+            workflowNodes={webSocket.workflowNodes}
+            thinkingLogs={webSocket.thinkingLogs}
+            onOpenThinkingDrawer={() => setIsThinkingLogsOpen(true)}
+            confirmationToolName={webSocket.confirmationToolName}
+            confirmationToolLabel={webSocket.confirmationToolLabel}
+            onSendConfirmationResponse={webSocket.sendConfirmationResponse}
             onOpenSourcesDrawer={(sources) => {
               setActiveSources(sources);
               setIsSourcesDrawerOpen(true);
@@ -2165,12 +687,9 @@ window.onresize = updateSize;
               return (
                 <TouchableOpacity
                   key={cmd.name}
-                  style={[
-                    styles.commandPopupItem,
-                    isActive && styles.commandPopupActive
-                  ]}
+                  style={[styles.commandPopupItem, isActive && styles.commandPopupActive]}
                   onPress={() => {
-                    setInputText(cmd.name + ' ');
+                    webSocket.setInputText(cmd.name + ' ');
                     setShowCommandPopup(false);
                   }}
                 >
@@ -2185,14 +704,14 @@ window.onresize = updateSize;
         {/* Input Bar Section */}
         <ChatInput
           inputText={inputText}
-          setInputText={setInputText}
-          handleSendMessage={handleSendMessage}
-          handleFileUpload={handleFileUpload}
-          handleVoicePress={handleVoicePress}
-          isVoiceActive={isVoiceActive}
-          uploadingFile={uploadingFile}
+          setInputText={webSocket.setInputText}
+          handleSendMessage={webSocket.handleSendMessage}
+          handleFileUpload={mediaPickers.handleFileUpload}
+          handleVoicePress={voiceLoop.handleVoicePress}
+          isVoiceActive={voiceLoop.isVoiceActive}
+          uploadingFile={loading}
           loading={loading}
-          showBtwOverlay={showBtwOverlay}
+          showBtwOverlay={webSocket.showBtwOverlay}
           activeModel={activeModel}
           formatModelName={formatModelName}
           VARIANTS={VARIANTS}
@@ -2201,95 +720,32 @@ window.onresize = updateSize;
           showVariantDropdown={showVariantDropdown}
           setShowVariantDropdown={setShowVariantDropdown}
           setShowModelModal={setShowModelModal}
-          activeEditingProjectId={activeEditingProjectId}
-          projects={projects}
-          setActiveEditingProjectId={setActiveEditingProjectId}
-          handleStopGeneration={handleStopGeneration}
+          activeEditingProjectId={playground.activeEditingProjectId}
+          projects={playground.projects}
+          setActiveEditingProjectId={playground.setActiveEditingProjectId}
+          handleStopGeneration={webSocket.handleStopGeneration}
           contextPercent={contextPercent}
-          stagedAttachment={stagedAttachment}
-          setStagedAttachment={setStagedAttachment}
-          showMediaPopover={showMediaPopover}
-          setShowMediaPopover={setShowMediaPopover}
-          handleCameraPress={handleCameraPress}
-          handlePhotosPress={handlePhotosPress}
-          handleFilesPress={handleFilesPress}
+          stagedAttachment={mediaPickers.stagedAttachment}
+          setStagedAttachment={mediaPickers.setStagedAttachment}
+          showMediaPopover={mediaPickers.uploadingFile}
+          setShowMediaPopover={mediaPickers.setUploadingFile}
+          handleCameraPress={mediaPickers.handleCameraPress}
+          handlePhotosPress={mediaPickers.handlePhotosPress}
+          handleFilesPress={mediaPickers.handleFilesPress}
           onKeyPress={handleKeyPress}
         />
       </KeyboardAvoidingView>
 
       {/* Stateless Side-Channel /btw Bottom Sheet Backdrop and Overlay */}
-      {showBtwOverlay && (
-        <TouchableOpacity
-          activeOpacity={1}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
-          onPress={() => {
-            setShowBtwOverlay(false);
-            setBtwMessages([]);
-          }}
-        />
-      )}
-      {showBtwOverlay && (
-        <View style={styles.btwBottomSheet}>
-          <View style={styles.btwBottomSheetHeader}>
-            <Text style={styles.btwBottomSheetTitle}>BY THE WAY — SIDE DOUBT</Text>
-            <TouchableOpacity
-              onPress={() => {
-                setShowBtwOverlay(false);
-                setBtwMessages([]);
-              }}
-              style={styles.btwBottomSheetClose}
-            >
-              <Ionicons name="close" size={14} color="#94a3b8" />
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={btwMessages}
-            keyExtractor={(_, idx) => `btw-${idx}`}
-            style={styles.btwBottomSheetContent}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => {
-              const isUser = item.role === 'user';
-              return (
-                <View style={{ marginVertical: 8, alignSelf: isUser ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
-                  <Text style={{
-                    fontSize: 9,
-                    fontWeight: '800',
-                    color: isUser ? '#f59e0b' : '#3b82f6',
-                    letterSpacing: 1.0,
-                    marginBottom: 4,
-                    alignSelf: isUser ? 'flex-end' : 'flex-start'
-                  }}>
-                    {isUser ? 'SIR' : 'VOXKAGE'}
-                  </Text>
-                  <View style={{
-                    backgroundColor: isUser ? 'rgba(59, 130, 246, 0.12)' : 'rgba(30, 41, 59, 0.45)',
-                    borderColor: isUser ? 'rgba(59, 130, 246, 0.35)' : 'rgba(255, 255, 255, 0.06)',
-                    borderWidth: 1,
-                    borderRadius: 16,
-                    borderTopRightRadius: isUser ? 2 : 16,
-                    borderTopLeftRadius: isUser ? 16 : 2,
-                    paddingHorizontal: 14,
-                    paddingVertical: 10,
-                    ...Platform.select({
-                      web: {
-                        boxShadow: isUser 
-                          ? '0 2px 8px rgba(59, 130, 246, 0.15)' 
-                          : '0 2px 8px rgba(0, 0, 0, 0.2)'
-                      } as any,
-                      default: {}
-                    })
-                  }}>
-                    <Text style={styles.btwMessageText}>{item.content}</Text>
-                  </View>
-                </View>
-              );
-            }}
-            ListFooterComponent={btwLoading ? (
-              <ActivityIndicator size="small" color="#3b82f6" style={{ marginVertical: 8 }} />
-            ) : null}
-          />
-        </View>
-      )}
+      <BtwOverlay
+        visible={webSocket.showBtwOverlay}
+        onClose={() => {
+          webSocket.setShowBtwOverlay(false);
+          webSocket.setBtwMessages([]);
+        }}
+        messages={webSocket.btwMessages}
+        loading={webSocket.btwLoading}
+      />
 
       {/* Model Selection Overlay — Inline Bottom Sheet inside Phone Frame */}
       <ModelSelectionModal
@@ -2306,10 +762,10 @@ window.onresize = updateSize;
       />
 
       {/* Voice pulse overlay */}
-      {isVoiceActive && (
+      {voiceLoop.isVoiceActive && (
         <View style={styles.voiceOverlay}>
           <Text style={styles.voiceTitle}>Listening...</Text>
-          <VoiceWaveVisualizer active={isVoiceActive} volume={micVolume} />
+          <VoiceWaveVisualizer active={voiceLoop.isVoiceActive} volume={voiceLoop.micVolume} />
           <Text style={styles.voiceSubtitle}>Speak your instruction, Sir</Text>
         </View>
       )}
@@ -2319,23 +775,23 @@ window.onresize = updateSize;
         isOpen={isSidebarOpen}
         onClose={closeSidebar}
         sidebarAnim={sidebarAnim}
-        createNewSession={createNewSession}
+        createNewSession={chatSessions.createNewSession}
         sessions={sessions}
         currentSessionId={currentSessionId}
-        selectSession={selectSession}
+        selectSession={chatSessions.selectSession}
         editingSessionId={editingSessionId}
-        setEditingSessionId={setEditingSessionId}
+        setEditingSessionId={chatSessions.setEditingSessionId}
         editingSessionName={editingSessionName}
-        setEditingSessionName={setEditingSessionName}
-        handleRenameSession={handleRenameSession}
-        deleteSession={deleteSession}
+        setEditingSessionName={chatSessions.setEditingSessionName}
+        handleRenameSession={chatSessions.handleRenameSession}
+        deleteSession={chatSessions.deleteSession}
         showSidebarSettings={showSidebarSettings}
         setShowSidebarSettings={setShowSidebarSettings}
         handleLogout={handleLogout}
         email={email}
         onPlaygroundPress={() => {
           closeSidebar();
-          setPlaygroundView('list');
+          playground.setPlaygroundView('list');
           openPlayground();
         }}
       />
@@ -2345,27 +801,27 @@ window.onresize = updateSize;
         isOpen={isPlaygroundOpen}
         onClose={closePlayground}
         playgroundAnim={playgroundAnim}
-        playgroundView={playgroundView}
-        setPlaygroundView={setPlaygroundView}
-        playgroundProjectName={playgroundProjectName}
-        playgroundProjectId={playgroundProjectId}
-        setPlaygroundProjectId={setPlaygroundProjectId}
-        setActiveEditingProjectId={setActiveEditingProjectId}
-        isLoadingProjects={isLoadingProjects}
-        projects={projects}
-        setPlaygroundHtml={setPlaygroundHtml}
-        setPlaygroundCss={setPlaygroundCss}
-        setPlaygroundJs={setPlaygroundJs}
-        setPlaygroundProjectName={setPlaygroundProjectName}
-        setPlaygroundRevision={setPlaygroundRevision}
-        projectToRename={projectToRename}
-        setProjectToRename={setProjectToRename}
-        renameProjectName={renameProjectName}
-        setRenameProjectName={setRenameProjectName}
-        handleRenameProject={handleRenameProject}
-        handleDeleteProject={handleDeleteProject}
+        playgroundView={playground.playgroundView}
+        setPlaygroundView={playground.setPlaygroundView}
+        playgroundProjectName={playground.playgroundProjectName}
+        playgroundProjectId={playground.playgroundProjectId}
+        setPlaygroundProjectId={playground.setPlaygroundProjectId}
+        setActiveEditingProjectId={playground.setActiveEditingProjectId}
+        isLoadingProjects={playground.isLoadingProjects}
+        projects={playground.projects}
+        setPlaygroundHtml={playground.setPlaygroundHtml}
+        setPlaygroundCss={playground.setPlaygroundCss}
+        setPlaygroundJs={playground.setPlaygroundJs}
+        setPlaygroundProjectName={playground.setPlaygroundProjectName}
+        setPlaygroundRevision={playground.setPlaygroundRevision}
+        projectToRename={playground.projectToRename}
+        setProjectToRename={playground.setProjectToRename}
+        renameProjectName={playground.renameProjectName}
+        setRenameProjectName={playground.setRenameProjectName}
+        handleRenameProject={playground.handleRenameProject}
+        handleDeleteProject={playground.handleDeleteProject}
         compiledSandboxHtml={compiledSandboxHtml}
-        playgroundRevision={playgroundRevision}
+        playgroundRevision={playground.playgroundRevision}
         token={token}
         backendUrl={backendUrl}
         currentSessionId={currentSessionId}
@@ -2374,115 +830,26 @@ window.onresize = updateSize;
       {/* Delete Confirmation Modal */}
       <DeleteConfirmModal
         sessionToDelete={sessionToDelete}
-        onCancel={() => setSessionToDelete(null)}
+        onCancel={() => chatSessions.setSessionToDelete(null)}
         onConfirm={(id) => {
-          setSessionToDelete(null);
-          executeDeleteSession(id);
+          chatSessions.setSessionToDelete(null);
+          chatSessions.executeDeleteSession(id);
         }}
       />
 
       {/* Thinking Logs Bottom Sheet Drawer */}
-      <Modal
-        visible={isThinkingDrawerOpen}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setIsThinkingDrawerOpen(false)}
-      >
-        <TouchableOpacity
-          activeOpacity={1}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
-          onPress={() => setIsThinkingDrawerOpen(false)}
-        />
-        <View style={styles.thinkingLogsDrawer}>
-          <View style={styles.thinkingLogsHeader}>
-            <Text style={styles.thinkingLogsTitle}>VOXKAGE THINKING PROCESS</Text>
-            <TouchableOpacity
-              onPress={() => setIsThinkingDrawerOpen(false)}
-              style={styles.thinkingLogsClose}
-            >
-              <Ionicons name="close" size={18} color="#94a3b8" />
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={thinkingLogs}
-            keyExtractor={(_, idx) => `log-${idx}`}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => {
-              const parts = item.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
-              const time = parts ? parts[1] : '';
-              const content = parts ? parts[2] : item;
-              return (
-                <View style={styles.thinkingLogLine}>
-                  <Text style={styles.thinkingLogTime}>{time}</Text>
-                  <Text style={styles.thinkingLogText}>{content}</Text>
-                </View>
-              );
-            }}
-          />
-        </View>
-      </Modal>
+      <ThinkingLogsModal
+        visible={isThinkingLogsOpen}
+        onClose={() => setIsThinkingLogsOpen(false)}
+        thinkingLogs={webSocket.thinkingLogs}
+      />
 
       {/* Sources Bottom Sheet Drawer */}
-      <Modal
+      <SourcesModal
         visible={isSourcesDrawerOpen}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setIsSourcesDrawerOpen(false)}
-      >
-        <TouchableOpacity
-          activeOpacity={1}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
-          onPress={() => setIsSourcesDrawerOpen(false)}
-        />
-        <View style={styles.sourcesBottomSheet}>
-          <View style={styles.sourcesBottomSheetHeader}>
-            <View style={styles.sourcesBottomSheetTitleRow}>
-              <Ionicons name="globe-outline" size={16} color="#60a5fa" />
-              <Text style={styles.sourcesBottomSheetTitle}>Consulted Sources</Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setIsSourcesDrawerOpen(false)}
-              style={styles.sourcesBottomSheetClose}
-            >
-              <Ionicons name="close" size={14} color="#94a3b8" />
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={activeSources}
-            keyExtractor={(item, idx) => `source-${idx}`}
-            showsVerticalScrollIndicator={false}
-            style={styles.sourcesList}
-            renderItem={({ item }) => {
-              const faviconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${item.domain}`;
-              return (
-                <TouchableOpacity
-                  style={styles.sourceListItem}
-                  onPress={() => {
-                    if (item.url) {
-                      Linking.openURL(item.url).catch(err => {
-                        Alert.alert("Error, Sir", "Could not open this URL.");
-                      });
-                    }
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Image source={{ uri: faviconUrl }} style={styles.sourceListItemFavicon} />
-                  <View style={styles.sourceListItemContent}>
-                    <Text style={styles.sourceListItemTitle} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.sourceListItemDomain} numberOfLines={1}>
-                      {item.domain}
-                    </Text>
-                  </View>
-                  <Ionicons name="arrow-forward" size={16} color="#64748b" />
-                </TouchableOpacity>
-              );
-            }}
-          />
-        </View>
-      </Modal>
-
+        onClose={() => setIsSourcesDrawerOpen(false)}
+        sources={activeSources}
+      />
     </View>
   );
 }
