@@ -90,7 +90,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
           style={styles.drawerBackdrop}
         />
       )}
-      <Animated.View style={[styles.playgroundDrawer, { left: playgroundAnim }, Platform.OS !== 'web' && { paddingTop: insets.top }]}>
+      <Animated.View style={[styles.playgroundDrawer, { left: playgroundAnim }, Platform.OS !== 'web' && { paddingTop: insets.top, paddingBottom: insets.bottom || (Platform.OS === 'android' ? 32 : 0) }]}>
         {/* Playground Header */}
         <View style={styles.playgroundHeader}>
           <TouchableOpacity 

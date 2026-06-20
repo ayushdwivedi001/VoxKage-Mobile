@@ -68,7 +68,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
           style={styles.drawerBackdrop}
         />
       )}
-      <Animated.View style={[styles.sidebarDrawer, { left: sidebarAnim }, Platform.OS !== 'web' && { paddingTop: insets.top }]}>
+      <Animated.View style={[styles.sidebarDrawer, { left: sidebarAnim }, Platform.OS !== 'web' && { paddingTop: insets.top, paddingBottom: insets.bottom || (Platform.OS === 'android' ? 32 : 0) }]}>
         <View style={styles.sidebarHeader}>
           <LogoV size={24} />
           <Text style={styles.sidebarTitle}>VoxKage</Text>

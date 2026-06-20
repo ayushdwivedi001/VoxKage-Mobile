@@ -11,6 +11,7 @@ import {
   FlatList,
   LogBox,
   StyleSheet,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -37,7 +38,8 @@ import { ChatInput } from '@/components/chat/ChatInput';
 import { SidebarDrawer, ChatSession } from '@/components/chat/SidebarDrawer';
 import { PlaygroundDrawer } from '@/components/chat/PlaygroundDrawer';
 import { VoiceWaveVisualizer } from '@/components/chat/VoiceWaveVisualizer';
-import { executeMobileTool } from '@/utils/mobileTools';
+import { WorkflowNode } from '@/components/chat/ToolWorkflowPath';
+import { executeMobileTool, selectBestVoice } from '@/utils/mobileTools';
 import { registerBackgroundTasks } from '@/utils/backgroundWorker';
 
 let Audio: any = null;
@@ -218,6 +220,14 @@ export default function ChatScreen() {
   const [btwMessages, setBtwMessages] = useState<{ role: string; content: string }[]>([]);
   const [btwLoading, setBtwLoading] = useState(false);
 
+
+  // Agentic Concurrency & Thinking Log States
+  const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([]);
+  const [thinkingLogs, setThinkingLogs] = useState<string[]>([]);
+  const [isThinkingDrawerOpen, setIsThinkingDrawerOpen] = useState(false);
+  const [confirmationToolName, setConfirmationToolName] = useState<string | null>(null);
+  const [confirmationToolLabel, setConfirmationToolLabel] = useState<string | null>(null);
+  const [confirmationRequestId, setConfirmationRequestId] = useState<string | null>(null);
 
   const [sidebarAnim] = useState(() => new Animated.Value(-280));
   const [playgroundAnim] = useState(() => new Animated.Value(drawerWidth));
@@ -1088,26 +1098,32 @@ window.onresize = updateSize;
           setSessions((prev) =>
             prev.map((s) => (s.id === sessionId ? { ...s, name: data.name } : s))
           );
+        } else if (data.type === 'tool_plan') {
+          setWorkflowNodes(data.nodes || []);
+        } else if (data.type === 'tool_start') {
+          setWorkflowNodes((prev) =>
+            prev.map((n) => (n.id === data.node_id ? { ...n, status: 'running' } : n))
+          );
+        } else if (data.type === 'tool_success') {
+          setWorkflowNodes((prev) =>
+            prev.map((n) => (n.id === data.node_id ? { ...n, status: 'success' } : n))
+          );
+        } else if (data.type === 'tool_failed') {
+          setWorkflowNodes((prev) =>
+            prev.map((n) => (n.id === data.node_id ? { ...n, status: 'failed' } : n))
+          );
+        } else if (data.type === 'agent_thought') {
+          const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setThinkingLogs((prev) => [...prev, `[${timestamp}] ${data.content}`]);
+        } else if (data.type === 'tool_confirm_request') {
+          setConfirmationToolName(data.tool_name);
+          setConfirmationToolLabel(data.label || data.tool_name);
+          setConfirmationRequestId(data.request_id);
         } else if (data.type === 'done') {
           setCompactionProgress(null);
           const associatedProjectId = data.project_id || null;
           const currText = streamingTextRef.current;
           updateStreamingText('');
-          
-          if (wasLastInputVoice.current && currText.trim()) {
-            const cleanText = currText
-              .replace(/```[\s\S]*?```/g, '') // remove code blocks
-              .replace(/<[^>]*>/g, '') // remove custom elements
-              .replace(/\*|_/g, '') // remove markdown bold/italic formatting
-              .trim();
-            if (cleanText) {
-              if (Speech && Speech.speak) {
-                Speech.speak(cleanText, { language: 'en' });
-              } else {
-                console.log('[Speech Fallback] Text to synthesize:', cleanText);
-              }
-            }
-          }
 
           if (currText.trim()) {
             const assistantMessageId = generateRandomId('assistant');
@@ -1346,6 +1362,12 @@ window.onresize = updateSize;
     const textToUse = typeof overrideText === 'string' ? overrideText : undefined;
     const userQuery = textToUse !== undefined ? textToUse.trim() : inputText.trim();
     if (!userQuery && !stagedAttachment) return;
+
+    setWorkflowNodes([]);
+    setThinkingLogs([]);
+    setConfirmationToolName(null);
+    setConfirmationToolLabel(null);
+    setConfirmationRequestId(null);
 
     wasLastInputVoice.current = textToUse !== undefined;
 
@@ -1636,6 +1658,52 @@ window.onresize = updateSize;
           }
         }
       }, 200);
+    }
+  };
+
+  const handleRetryMessage = async (message: ChatMessage, index: number) => {
+    let userMsgIndex = -1;
+    for (let i = index - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        userMsgIndex = i;
+        break;
+      }
+    }
+
+    if (userMsgIndex === -1) {
+      console.log('[-] Retry failed: No preceding user message found, Sir.');
+      return;
+    }
+
+    const previousUserQuery = messages[userMsgIndex].content;
+
+    // Send delete/retry command to WebSocket first to clean up DB
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'chat_retry',
+        index: userMsgIndex
+      }));
+    }
+
+    // Truncate local chat history
+    setMessages(messages.slice(0, userMsgIndex));
+
+    // Resubmit query
+    await handleSendMessage(previousUserQuery);
+  };
+
+  const sendConfirmationResponse = (confirm: boolean, alwaysAllow: boolean) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && confirmationRequestId) {
+      wsRef.current.send(JSON.stringify({
+        type: 'tool_confirm_response',
+        request_id: confirmationRequestId,
+        confirm,
+        always_allow: alwaysAllow,
+        tool_name: confirmationToolName,
+      }));
+      setConfirmationToolName(null);
+      setConfirmationToolLabel(null);
+      setConfirmationRequestId(null);
     }
   };
 
@@ -2035,7 +2103,7 @@ window.onresize = updateSize;
           styles.mainWrapper,
           Platform.OS !== 'web' && {
             paddingTop: insets.top,
-            paddingBottom: insets.bottom,
+            paddingBottom: insets.bottom || (Platform.OS === 'android' ? 32 : 0),
           },
         ]}
       >
@@ -2069,6 +2137,13 @@ window.onresize = updateSize;
             handleOpenCodeInPlayground={handleOpenCodeInPlayground}
             messageProjectIds={messageProjectIds}
             onDrillAnswer={handleDrillAnswer}
+            onRetry={handleRetryMessage}
+            workflowNodes={workflowNodes}
+            thinkingLogs={thinkingLogs}
+            onOpenThinkingDrawer={() => setIsThinkingDrawerOpen(true)}
+            confirmationToolName={confirmationToolName}
+            confirmationToolLabel={confirmationToolLabel}
+            onSendConfirmationResponse={sendConfirmationResponse}
           />
         )}
 
@@ -2295,6 +2370,47 @@ window.onresize = updateSize;
           executeDeleteSession(id);
         }}
       />
+
+      {/* Thinking Logs Bottom Sheet Drawer */}
+      <Modal
+        visible={isThinkingDrawerOpen}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsThinkingDrawerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
+          onPress={() => setIsThinkingDrawerOpen(false)}
+        />
+        <View style={styles.thinkingLogsDrawer}>
+          <View style={styles.thinkingLogsHeader}>
+            <Text style={styles.thinkingLogsTitle}>VOXKAGE THINKING PROCESS</Text>
+            <TouchableOpacity
+              onPress={() => setIsThinkingDrawerOpen(false)}
+              style={styles.thinkingLogsClose}
+            >
+              <Ionicons name="close" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={thinkingLogs}
+            keyExtractor={(_, idx) => `log-${idx}`}
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) => {
+              const parts = item.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
+              const time = parts ? parts[1] : '';
+              const content = parts ? parts[2] : item;
+              return (
+                <View style={styles.thinkingLogLine}>
+                  <Text style={styles.thinkingLogTime}>{time}</Text>
+                  <Text style={styles.thinkingLogText}>{content}</Text>
+                </View>
+              );
+            }}
+          />
+        </View>
+      </Modal>
 
     </View>
   );

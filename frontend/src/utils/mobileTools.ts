@@ -93,6 +93,101 @@ try {
   console.log('[MobileTools] Failed to set notification handler at top level:', e);
 }
 
+let bestVoiceId: string | undefined = undefined;
+
+export const selectBestVoice = async (Speech: any): Promise<string | undefined> => {
+  if (bestVoiceId) return bestVoiceId;
+  try {
+    const voices = await Speech.getAvailableVoicesAsync();
+    if (!voices || voices.length === 0) return undefined;
+
+    // Filter for English voices
+    const enVoices = voices.filter((v: any) => 
+      v.language && (v.language.toLowerCase().startsWith('en') || v.language.toLowerCase().includes('en'))
+    );
+
+    if (enVoices.length === 0) return undefined;
+
+    // Scoring system to pick the best voice (prefer enhanced US English male voices)
+    let bestVoice = enVoices[0];
+    let maxScore = -1;
+
+    for (const voice of enVoices) {
+      let score = 0;
+      const nameLower = (voice.name || '').toLowerCase();
+      const idLower = (voice.identifier || '').toLowerCase();
+
+      // Quality scoring
+      if (voice.quality === 'enhanced' || voice.quality === 1) {
+        score += 100;
+      }
+
+      // Accent scoring (prefer en-US for natural accent)
+      if (voice.language.toLowerCase().includes('us') || voice.language.toLowerCase().includes('en-us')) {
+        score += 50;
+      }
+
+      // Gender preference (JARVIS-like professional male voice preferred over robotic female)
+      if (nameLower.includes('male') || nameLower.includes('guy') || nameLower.includes('jarvis') || idLower.includes('male') || idLower.includes('guy') || idLower.includes('jarvis')) {
+        score += 30;
+      }
+
+      // Engine brand (Google TTS is generally higher quality than basic system offline)
+      if (nameLower.includes('google') || nameLower.includes('com.google')) {
+        score += 20;
+      }
+
+      if (score > maxScore) {
+        maxScore = score;
+        bestVoice = voice;
+      }
+    }
+
+    bestVoiceId = bestVoice.identifier;
+    console.log('[TTS] Selected best English voice:', bestVoice.name, '(', bestVoice.language, ')');
+    return bestVoiceId;
+  } catch (e) {
+    console.log('[TTS] Error choosing best voice:', e);
+    return undefined;
+  }
+};
+
+export const cleanTextForSpeech = (text: string): string => {
+  if (!text) return '';
+  
+  let cleaned = text;
+  
+  // 1. Remove code blocks entirely (instead of saying "[code block omitted]")
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
+  
+  // 2. Remove inline code snippets (e.g. `const x = 5`)
+  cleaned = cleaned.replace(/`[^`]+`/g, ' ');
+  
+  // 3. Keep only the text of markdown links: [Link Text](http://...) -> Link Text
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  
+  // 4. Remove custom markup tags (e.g., <LinkCard />, <ButtonRow />)
+  cleaned = cleaned.replace(/<[^>]*>/g, ' ');
+  
+  // 5. Remove standard URLs and deep links (e.g., https://google.com, tg://resolve, vnd.youtube://)
+  cleaned = cleaned.replace(/https?:\/\/\S+/gi, ' ');
+  cleaned = cleaned.replace(/[a-zA-Z0-9_-]+:\/\/\S+/gi, ' ');
+  
+  // 6. Remove standard emojis and pictographs
+  cleaned = cleaned.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]/g, '');
+  
+  // 7. Remove raw formatting symbols and technical punctuation (keeping sentence-level punctuation like . , ? !)
+  cleaned = cleaned.replace(/[*#_~`\\|{}[\]()\-+]/g, ' ');
+  
+  // 8. Remove any remaining isolated URI characters like :// or isolated colons/slashes
+  cleaned = cleaned.replace(/:\/+/g, ' ');
+  
+  // 9. Normalize spacing
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  
+  return cleaned;
+};
+
 export const executeMobileTool = async (name: string, args: any): Promise<any> => {
   console.log(`[MobileTool] Executing: ${name}`, args);
 
@@ -501,6 +596,28 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
       throw new Error('Intent launching is only supported natively on Android, Sir.');
     }
 
+    case 'mobile_open_url': {
+      const url = args.url;
+      if (!url) throw new Error('No URL provided, Sir.');
+      const Linking = require('react-native').Linking;
+      try {
+        const supported = await Linking.canOpenURL(url);
+        if (supported) {
+          await Linking.openURL(url);
+          return { status: 'success' };
+        } else {
+          // Force try opening it anyway as some deep links might fail canOpenURL checks without configuration
+          await Linking.openURL(url);
+          return { status: 'forced_success' };
+        }
+      } catch (e) {
+        console.log('[MobileTools] Failed to open URL:', url, e);
+        // Direct fallback attempt
+        await Linking.openURL(url);
+        return { status: 'fallback_success' };
+      }
+    }
+
     // 10. Sharing
     case 'mobile_share_file': {
       const Sharing = getSharing();
@@ -586,10 +703,13 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
       if (Speech) {
         try {
           await Speech.stop();
-          Speech.speak(args.text, {
+          const cleanedText = cleanTextForSpeech(args.text);
+          const voiceId = await selectBestVoice(Speech);
+          Speech.speak(cleanedText, {
             language: args.language || 'en',
+            voice: voiceId,
             pitch: args.pitch || 1.0,
-            rate: args.rate || 1.0,
+            rate: args.rate || 0.95, // 0.95 for premium natural pacing
           });
           return { status: 'success' };
         } catch (e) {

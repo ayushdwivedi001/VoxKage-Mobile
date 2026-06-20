@@ -902,6 +902,14 @@ async def chat_ws_reader(websocket: WebSocket, receive_queue: asyncio.Queue):
                         if not future.done():
                             future.set_result(payload_data)
                     continue
+                elif msg_type == "tool_confirm_response":
+                    from agent_loop import CONFIRMATION_CHANNELS
+                    request_id = payload_data.get("request_id")
+                    if request_id and request_id in CONFIRMATION_CHANNELS:
+                        future = CONFIRMATION_CHANNELS[request_id]
+                        if not future.done():
+                            future.set_result(payload_data)
+                    continue
             except Exception:
                 pass
             await receive_queue.put(data)
@@ -951,6 +959,28 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 raise data
 
             payload_data = json.loads(data)
+            
+            # Intercept chat retry request
+            if payload_data.get("type") == "chat_retry":
+                retry_index = payload_data.get("index")
+                if retry_index is not None:
+                    try:
+                        from database import get_db
+                        all_msgs = get_session_messages(session_id)
+                        if retry_index < len(all_msgs):
+                            target_msg = all_msgs[retry_index]
+                            db = get_db()
+                            db.table("messages").delete().eq("session_id", session_id).gte("timestamp", target_msg["timestamp"]).execute()
+                            
+                            # Reload history
+                            messages_history = get_session_messages(session_id)
+                            new_percent = calculate_context_percent(messages_history)
+                            await websocket.send_text(json.dumps({"type": "context_sync", "percent": new_percent}))
+                            await websocket.send_text(json.dumps({"type": "retry_ack", "status": "success"}))
+                    except Exception as e:
+                        print(f"[-] Retry database cleanup failed: {e}")
+                continue
+
             query = payload_data.get("message", "").strip()
             model_key = payload_data.get("model", "deepseek-flash")
             active_project = payload_data.get("active_project", None)
