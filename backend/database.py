@@ -1,5 +1,6 @@
 import os
-from supabase import create_client, Client
+import httpx
+from supabase import create_client, Client, ClientOptions
 from fastapi import HTTPException
 
 # --- Supabase Credentials ---
@@ -19,7 +20,11 @@ def get_db() -> Client:
             detail="Supabase credentials (SUPABASE_URL, SUPABASE_KEY) are not set in backend environment."
         )
     try:
-        _client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # Create a custom httpx Client to disable HTTP/2.
+        # This prevents httpcore.RemoteProtocolError: ConnectionTerminated errors on Hugging Face Spaces.
+        custom_client = httpx.Client(http2=False)
+        options = ClientOptions(httpx_client=custom_client)
+        _client = create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
         return _client
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect to Supabase: {str(e)}")

@@ -323,7 +323,17 @@ function ChartComponent({
     label: labels[idx] || '',
   })) : [];
   
-  const chartWidth = isZoomed ? screenWidth - 64 : screenWidth - 96;
+  const dataPointsCount = Math.max(
+    values.length,
+    seriesList[0]?.values?.length || 0,
+    seriesList[1]?.values?.length || 0
+  );
+  const minSpacing = isZoomed ? 75 : 60;
+  const computedWidth = dataPointsCount > 0 
+    ? Math.max(isZoomed ? screenWidth - 64 : screenWidth - 96, dataPointsCount * minSpacing + 24)
+    : (isZoomed ? screenWidth - 64 : screenWidth - 96);
+  
+  const chartWidth = computedWidth;
   const chartHeight = isZoomed ? 300 : 140;
 
   const commonChartProps = {
@@ -438,13 +448,19 @@ function ChartComponent({
 
   return (
     <View style={[styles.chartCard, isZoomed && { backgroundColor: 'transparent', borderWidth: 0, padding: 0, marginVertical: 0 }]}>
-      <Text style={styles.chartTitle}>{title}</Text>
-      <View style={{ paddingRight: 10, marginVertical: 10 }}>
-        {renderGiftedChart()}
-      </View>
+      {!isZoomed && <Text style={styles.chartTitle}>{title}</Text>}
+      <ScrollView 
+        horizontal={true} 
+        showsHorizontalScrollIndicator={type !== 'pie'}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: type === 'pie' ? 'center' : 'flex-start' }}
+      >
+        <View style={{ paddingRight: type === 'pie' ? 0 : 16, marginVertical: 10 }}>
+          {renderGiftedChart()}
+        </View>
+      </ScrollView>
       
       {!isZoomed && onPressZoom && (
-        <View style={styles.imageCardActionBar}>
+        <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 12 }}>
           <TouchableOpacity 
             onPress={onPressZoom} 
             style={styles.imageCardActionBtn}
@@ -1961,6 +1977,7 @@ const styles = StyleSheet.create({
     borderColor: '#171717',
     padding: 14,
     marginVertical: 8,
+    overflow: 'hidden',
   },
   chartTitle: {
     color: '#ffffff',
