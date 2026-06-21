@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated, Modal } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated, Modal, Dimensions } from 'react-native';
 
 // --- Dedicated Static Require Helpers to prevent Metro build/compilation errors ---
 const getFileSystem = () => {
@@ -61,6 +61,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
 import Svg, { Rect, Line, Circle, Path, Text as SvgText } from 'react-native-svg';
+import { LineChart, BarChart, PieChart } from 'react-native-gifted-charts';
 
 // --- Lightweight FadeInView Helper Component ---
 function FadeInView({ children, style }: { children: React.ReactNode; style?: any }) {
@@ -260,121 +261,199 @@ function ButtonRowComponent({ buttonsString }: { buttonsString: string }) {
   );
 }
 
-// --- Dynamic SVG Graph & Chart Component ---
-function ChartComponent({ type, dataString, labelsString }: { type: string; dataString: string; labelsString: string }) {
-  const data = dataString.split(',').map(n => parseFloat(n.trim()) || 0);
-  const labels = labelsString.split(',').map(l => l.trim());
+// --- Dynamic Gifted Chart Component (100% Client-side, Interactive) ---
+const { width: screenWidth } = Dimensions.get('window');
 
-  if (data.length === 0) return null;
+interface ChartComponentProps {
+  type: string;
+  title?: string;
+  dataString?: string;
+  seriesString?: string;
+  labelsString?: string;
+  color?: string;
+  isZoomed?: boolean;
+  onPressZoom?: () => void;
+}
 
-  const chartHeight = 150;
-  const chartWidth = 280;
-  const paddingLeft = 35;
-  const paddingRight = 10;
-  const paddingTop = 20;
-  const paddingBottom = 25;
+function ChartComponent({
+  type,
+  title = 'Performance Metrics',
+  dataString = '',
+  seriesString = '',
+  labelsString = '',
+  color = '#3b82f6',
+  isZoomed = false,
+  onPressZoom,
+}: ChartComponentProps) {
+  const values = dataString ? dataString.split(',').map(n => parseFloat(n.trim()) || 0) : [];
+  const labels = labelsString ? labelsString.split(',').map(l => l.trim()) : [];
+  
+  const seriesList = seriesString ? seriesString.split('|').map(s => {
+    const colonIdx = s.indexOf(':');
+    if (colonIdx === -1) return { name: 'Series', values: s.split(',').map(n => parseFloat(n.trim()) || 0) };
+    return {
+      name: s.substring(0, colonIdx).trim(),
+      values: s.substring(colonIdx + 1).split(',').map(n => parseFloat(n.trim()) || 0)
+    };
+  }) : [];
 
-  const maxVal = Math.max(...data, 10);
-  const minVal = Math.min(...data, 0);
-  const valRange = maxVal - minVal || 1;
+  const hasData = values.length > 0 || seriesList.length > 0;
+  if (!hasData) return null;
 
-  const plotWidth = chartWidth - paddingLeft - paddingRight;
-  const plotHeight = chartHeight - paddingTop - paddingBottom;
+  let strokeColor = color;
+  let isStockUp = true;
+  
+  if (type === 'stock' && values.length >= 2) {
+    isStockUp = values[values.length - 1] >= values[0];
+    strokeColor = isStockUp ? '#10b981' : '#ef4444';
+  }
 
-  const getX = (index: number) => {
-    if (data.length <= 1) return paddingLeft + plotWidth / 2;
-    return paddingLeft + (index / (data.length - 1)) * plotWidth;
+  const chartData = values.map((val, idx) => ({
+    value: val,
+    label: labels[idx] || '',
+    labelTextStyle: { color: '#64748b', fontSize: 9 },
+  }));
+
+  const seriesData1 = seriesList[0] ? seriesList[0].values.map((val, idx) => ({
+    value: val,
+    label: labels[idx] || '',
+  })) : [];
+  const seriesData2 = seriesList[1] ? seriesList[1].values.map((val, idx) => ({
+    value: val,
+    label: labels[idx] || '',
+  })) : [];
+  
+  const chartWidth = isZoomed ? screenWidth - 64 : screenWidth - 96;
+  const chartHeight = isZoomed ? 300 : 140;
+
+  const commonChartProps = {
+    width: chartWidth,
+    height: chartHeight,
+    noOfSections: 4,
+    yAxisTextStyle: { color: '#64748b', fontSize: 9 },
+    xAxisLabelTextStyle: { color: '#64748b', fontSize: 9 },
+    xAxisThickness: 1,
+    xAxisColor: 'rgba(255,255,255,0.1)',
+    yAxisThickness: 1,
+    yAxisColor: 'rgba(255,255,255,0.1)',
+    rulesColor: 'rgba(255,255,255,0.05)',
+    rulesType: 'dashed',
+    animateOnDataChange: true,
+    animationDuration: 800,
+    textColor1: '#f8fafc',
   };
 
-  const getY = (value: number) => {
-    return paddingTop + plotHeight - ((value - minVal) / valRange) * plotHeight;
-  };
-
-  const renderLineChart = () => {
-    let path = '';
-    data.forEach((val, idx) => {
-      const x = getX(idx);
-      const y = getY(val);
-      if (idx === 0) {
-        path += `M ${x} ${y}`;
-      } else {
-        path += ` L ${x} ${y}`;
-      }
-    });
-
-    let areaPath = '';
-    if (data.length > 0) {
-      areaPath = `${path} L ${getX(data.length - 1)} ${getY(minVal)} L ${getX(0)} ${getY(minVal)} Z`;
+  const renderGiftedChart = () => {
+    if (type === 'pie') {
+      const pieColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+      const pieData = chartData.map((d, idx) => ({
+        value: d.value,
+        text: d.label || `${d.value}`,
+        color: pieColors[idx % pieColors.length],
+      }));
+      return (
+        <View style={{ alignItems: 'center', marginVertical: 10 }}>
+          <PieChart
+            data={pieData}
+            donut
+            showText
+            textColor="#ffffff"
+            textSize={10}
+            radius={isZoomed ? 100 : 60}
+            innerRadius={isZoomed ? 60 : 35}
+            innerCircleColor="#090d16"
+          />
+        </View>
+      );
     }
 
-    return (
-      <React.Fragment>
-        {areaPath ? <Path d={areaPath} fill="rgba(37, 99, 235, 0.08)" /> : null}
-        {path ? <Path d={path} fill="none" stroke="#3b82f6" strokeWidth={2} /> : null}
-        {data.map((val, idx) => (
-          <Circle
-            key={`dot-${idx}`}
-            cx={getX(idx)}
-            cy={getY(val)}
-            r={3.5}
-            fill="#090d16"
-            stroke="#3b82f6"
-            strokeWidth={1.5}
-          />
-        ))}
-      </React.Fragment>
-    );
-  };
-
-  const renderBarChart = () => {
-    const barWidth = Math.max(5, (plotWidth / data.length) * 0.6);
-    return data.map((val, idx) => {
-      const x = getX(idx) - barWidth / 2;
-      const y = getY(val);
-      const height = getY(minVal) - y;
+    if (type === 'bar') {
       return (
-        <Rect
-          key={`bar-${idx}`}
-          x={x}
-          y={y}
-          width={barWidth}
-          height={Math.max(1, height)}
-          fill="#3b82f6"
-          rx={2}
+        <BarChart
+          {...commonChartProps}
+          data={chartData}
+          frontColor={color}
+          roundedTop
+          roundedBottom
         />
       );
-    });
+    }
+
+    if (seriesList.length >= 2) {
+      return (
+        <LineChart
+          {...commonChartProps}
+          data={seriesData1}
+          data2={seriesData2}
+          color1="#3b82f6"
+          color2="#10b981"
+          thickness={2.5}
+          dataPointsColor1="#3b82f6"
+          dataPointsColor2="#10b981"
+        />
+      );
+    } else {
+      const isArea = type === 'stock' || type === 'area';
+      return (
+        <LineChart
+          {...commonChartProps}
+          data={chartData}
+          color={strokeColor}
+          thickness={2.5}
+          dataPointsColor={strokeColor}
+          areaChart={isArea}
+          startFillColor={isArea ? `rgba(${isStockUp ? '16,185,129' : '239,68,68'}, 0.25)` : undefined}
+          endFillColor="rgba(0,0,0,0)"
+          pointerConfig={{
+            pointerStripColor: 'rgba(255, 255, 255, 0.2)',
+            pointerStripWidth: 1.5,
+            pointerColor: strokeColor,
+            radius: 5,
+            pointerLabelComponent: (items: any) => {
+              if (!items || items.length === 0) return null;
+              return (
+                <View style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  backgroundColor: '#1e293b',
+                  borderRadius: 6,
+                  borderWidth: 1,
+                  borderColor: '#334155',
+                  position: 'absolute',
+                  top: -40,
+                  left: -30,
+                  zIndex: 999
+                }}>
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+                    {items[0].value}
+                  </Text>
+                </View>
+              );
+            }
+          }}
+        />
+      );
+    }
   };
 
   return (
-    <View style={styles.chartCard}>
-      <Text style={styles.chartTitle}>{type.toUpperCase()} Performance Metrics</Text>
-      <View style={styles.chartSvgContainer}>
-        <Svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-          <Line x1={paddingLeft} y1={paddingTop} x2={chartWidth - paddingRight} y2={paddingTop} stroke="#1e293b" strokeDasharray="3,3" />
-          <Line x1={paddingLeft} y1={paddingTop + plotHeight/2} x2={chartWidth - paddingRight} y2={paddingTop + plotHeight/2} stroke="#1e293b" strokeDasharray="3,3" />
-          <Line x1={paddingLeft} y1={paddingTop + plotHeight} x2={chartWidth - paddingRight} y2={paddingTop + plotHeight} stroke="#1e293b" />
-
-          <SvgText x={paddingLeft - 8} y={paddingTop + 4} fill="#64748b" fontSize={9} textAnchor="end">{maxVal.toFixed(0)}</SvgText>
-          <SvgText x={paddingLeft - 8} y={paddingTop + plotHeight/2 + 4} fill="#64748b" fontSize={9} textAnchor="end">{((maxVal + minVal)/2).toFixed(0)}</SvgText>
-          <SvgText x={paddingLeft - 8} y={paddingTop + plotHeight + 4} fill="#64748b" fontSize={9} textAnchor="end">{minVal.toFixed(0)}</SvgText>
-
-          {type.toLowerCase() === 'bar' ? renderBarChart() : renderLineChart()}
-
-          {labels.map((lbl, idx) => (
-            <SvgText
-              key={`lbl-${idx}`}
-              x={getX(idx)}
-              y={chartHeight - 8}
-              fill="#64748b"
-              fontSize={8.5}
-              textAnchor="middle"
-            >
-              {lbl}
-            </SvgText>
-          ))}
-        </Svg>
+    <View style={[styles.chartCard, isZoomed && { backgroundColor: 'transparent', borderWidth: 0, padding: 0, marginVertical: 0 }]}>
+      <Text style={styles.chartTitle}>{title}</Text>
+      <View style={{ paddingRight: 10, marginVertical: 10 }}>
+        {renderGiftedChart()}
       </View>
+      
+      {!isZoomed && onPressZoom && (
+        <View style={styles.imageCardActionBar}>
+          <TouchableOpacity 
+            onPress={onPressZoom} 
+            style={styles.imageCardActionBtn}
+          >
+            <Ionicons name="expand-outline" size={13} color="#94a3b8" />
+            <Text style={styles.imageCardActionText}>Zoom Chart</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -781,7 +860,8 @@ function parseCustomComponents(
   text: string, 
   keyPrefix: string, 
   onDrillAnswer?: (answer: string) => void,
-  onPressImage?: (uri: string, alt?: string) => void
+  onPressImage?: (uri: string, alt?: string) => void,
+  onPressChart?: (chartProps: any) => void
 ) {
   const componentTagRegex = /<(LinkCard|Map|ButtonRow|Chart|Carousel|Weather|TaskList|DrillQuestion)\b([^>]*?)\/>/g;
   const elements = [];
@@ -796,7 +876,7 @@ function parseCustomComponents(
     if (textBefore.trim()) {
       elements.push(
         <View key={`text-${keyPrefix}-${match.index}`} style={styles.textContainer}>
-          {renderTextWithInlineFormatting(textBefore, onPressImage)}
+          {renderTextWithInlineFormatting(textBefore, onPressImage, onPressChart)}
         </View>
       );
     }
@@ -836,8 +916,19 @@ function parseCustomComponents(
         <FadeInView key={`component-${keyPrefix}-${match.index}`}>
           <ChartComponent
             type={attrs.type || 'line'}
+            title={attrs.title}
             dataString={attrs.data || ''}
+            seriesString={attrs.series || ''}
             labelsString={attrs.labels || ''}
+            color={attrs.color || '#3b82f6'}
+            onPressZoom={onPressChart ? () => onPressChart({
+              type: attrs.type || 'line',
+              title: attrs.title,
+              dataString: attrs.data || '',
+              seriesString: attrs.series || '',
+              labelsString: attrs.labels || '',
+              color: attrs.color || '#3b82f6'
+            }) : undefined}
           />
         </FadeInView>
       );
@@ -893,7 +984,7 @@ function parseCustomComponents(
   if (textAfter.trim()) {
     elements.push(
       <View key={`text-${keyPrefix}-end`} style={styles.textContainer}>
-        {renderTextWithInlineFormatting(textAfter, onPressImage)}
+        {renderTextWithInlineFormatting(textAfter, onPressImage, onPressChart)}
       </View>
     );
   }
@@ -909,6 +1000,7 @@ interface MarkdownRendererProps {
 
 export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps) {
   const [activeImage, setActiveImage] = useState<{ uri: string; alt?: string } | null>(null);
+  const [activeChart, setActiveChart] = useState<any | null>(null);
   const [scaleAnim] = useState(() => new Animated.Value(0.9));
   const [opacityAnim] = useState(() => new Animated.Value(0));
 
@@ -940,6 +1032,22 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
     ]).start();
   };
 
+  const handlePressChart = (chartProps: any) => {
+    setActiveChart(chartProps);
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+  };
+
   const handleCloseLightbox = () => {
     Animated.parallel([
       Animated.timing(scaleAnim, {
@@ -954,6 +1062,7 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
       }),
     ]).start(() => {
       setActiveImage(null);
+      setActiveChart(null);
     });
   };
 
@@ -981,7 +1090,7 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
 
     // Render plain text and dynamic components before code block
     if (textBefore.trim()) {
-      elements.push(...parseCustomComponents(textBefore, `before-${match.index}`, onDrillAnswer, handlePressImage));
+      elements.push(...parseCustomComponents(textBefore, `before-${match.index}`, onDrillAnswer, handlePressImage, handlePressChart));
     }
 
     // Render code block with VS Code syntax highlighting
@@ -1010,20 +1119,19 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
   // Render remaining text after last code block
   const textAfter = text.substring(lastIndex);
   if (textAfter.trim()) {
-    elements.push(...parseCustomComponents(textAfter, 'end', onDrillAnswer, handlePressImage));
+    elements.push(...parseCustomComponents(textAfter, 'end', onDrillAnswer, handlePressImage, handlePressChart));
   }
 
   return (
     <View style={styles.container}>
       {elements}
-
-      <Modal
-        visible={activeImage !== null}
+      <Modal
+        visible={activeImage !== null || activeChart !== null}
         transparent={true}
         animationType="none"
         onRequestClose={handleCloseLightbox}
       >
-        {activeImage && (
+        {(activeImage || activeChart) && (
           <Animated.View style={[styles.lightboxContainer, { opacity: opacityAnim }]}>
             <TouchableOpacity 
               activeOpacity={1} 
@@ -1034,50 +1142,67 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
             <TouchableOpacity onPress={handleCloseLightbox} style={styles.lightboxCloseButton}>
               <Ionicons name="close" size={24} color="#ffffff" />
             </TouchableOpacity>
-
+ 
             <Animated.View style={[styles.lightboxImageContainer, { transform: [{ scale: scaleAnim }] }]}>
-              {Platform.OS === 'ios' ? (
-                <ScrollView
-                  maximumZoomScale={3}
-                  minimumZoomScale={1}
-                  showsHorizontalScrollIndicator={false}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
-                >
+              {activeImage ? (
+                Platform.OS === 'ios' ? (
+                  <ScrollView
+                    maximumZoomScale={3}
+                    minimumZoomScale={1}
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
+                  >
+                    <Image
+                      source={{ uri: activeImage.uri }}
+                      style={styles.lightboxImage}
+                      resizeMode="contain"
+                    />
+                  </ScrollView>
+                ) : (
                   <Image
                     source={{ uri: activeImage.uri }}
                     style={styles.lightboxImage}
                     resizeMode="contain"
                   />
-                </ScrollView>
+                )
               ) : (
-                <Image
-                  source={{ uri: activeImage.uri }}
-                  style={styles.lightboxImage}
-                  resizeMode="contain"
-                />
+                <View style={{ width: '100%', paddingHorizontal: 20 }}>
+                  <ChartComponent
+                    {...activeChart}
+                    isZoomed={true}
+                  />
+                </View>
               )}
             </Animated.View>
-
+ 
             <View style={styles.lightboxBottomBar}>
-              {activeImage.alt ? (
+              {activeImage?.alt ? (
                 <Text style={styles.lightboxTitle} numberOfLines={2}>
                   {activeImage.alt}
+                </Text>
+              ) : activeChart?.title ? (
+                <Text style={styles.lightboxTitle} numberOfLines={2}>
+                  {activeChart.title}
                 </Text>
               ) : null}
               
               <View style={styles.lightboxButtons}>
-                <TouchableOpacity 
-                  onPress={() => saveImageToGallery(activeImage.uri)} 
-                  style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
-                >
-                  <Ionicons name="download-outline" size={16} color="#ffffff" />
-                  <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
-                    Save to Gallery
-                  </Text>
-                </TouchableOpacity>
+                {activeImage ? (
+                  <TouchableOpacity 
+                    onPress={() => saveImageToGallery(activeImage.uri)} 
+                    style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
+                  >
+                    <Ionicons name="download-outline" size={16} color="#ffffff" />
+                    <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
+                      Save to Gallery
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={{ color: '#64748b', fontSize: 12 }}>Interactive chart preview, Sir</Text>
+                )}
                 
-                {!activeImage.uri.startsWith('data:image/') && (
+                {activeImage && !activeImage.uri.startsWith('data:image/') && (
                   <>
                     <TouchableOpacity 
                       onPress={() => WebBrowser.openBrowserAsync(activeImage.uri)} 
@@ -1291,7 +1416,8 @@ function renderTable(tableLines: string[], keyBase: number) {
 
 function renderTextWithInlineFormatting(
   rawText: string,
-  onPressImage?: (uri: string, alt?: string) => void
+  onPressImage?: (uri: string, alt?: string) => void,
+  onPressChart?: (chartProps: any) => void
 ) {
   const lines = rawText.split('\n');
   const renderedElements = [];

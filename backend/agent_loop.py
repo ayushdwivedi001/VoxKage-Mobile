@@ -86,7 +86,7 @@ from workspace_helpers import (
     ensure_active_project
 )
 from hud_parser import HudStreamParser
-from tool_executor import get_tool_label, run_matplotlib_script, fetch_images_for_query
+from tool_executor import get_tool_label, fetch_images_for_query
 from system_prompt import BASE_SYSTEM_PROMPT
 
 # Shared laptop responses channel: { email: asyncio.Future }
@@ -654,8 +654,6 @@ async def execute_tool_call_v2(
                 announcement = f"Deleting workspace file: {args.get('file_path', '')}..."
             elif name == "workspace_syntax_check":
                 announcement = f"Checking syntax for: {args.get('file_path', '')}..."
-            elif name == "run_matplotlib_script":
-                announcement = f"Generating professional chart using Matplotlib..."
 
             if announcement:
                 await send_to_client({"type": "hud_log", "content": announcement})
@@ -694,12 +692,6 @@ async def execute_tool_call_v2(
                 confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
                 await send_to_client({"type": "token", "content": confirm_msg})
                 tool_output = f"Chat history successfully compacted. Compaction Summary: {summary}"
-
-            elif name == "run_matplotlib_script":
-                c = args.get("code", "")
-                t = args.get("title", "chart")
-                tool_output = run_matplotlib_script(c, t)
-
             elif name == "query_rag":
                 q = args.get("query", "")
                 doc_id = tool_context.get("document_id")

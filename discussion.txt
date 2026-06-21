@@ -99,3 +99,154 @@ To keep the user informed without cluttering the chat history, the progress card
 - **Explicit Cancellation**: Pressing the cancel button sends a `DELETE /projects/swarm/cancel` call, stopping all backend loops, freeing up resources, and rendering a cancelled status badge on the card.
 
 
+## 12. RUNNING PYTHON & RENDERING INTERACTIVE PLOTS (MATPLOTLIB/ML) IN REACT MOBILE (NEW PROPOSAL)
+
+This proposal addresses the need to execute Python scripts (using libraries like Matplotlib, NumPy, Pandas, and Scikit-learn) and render premium, interactive data visualizations (ML graphs, stock charts, etc.) inside the React Native client (VoxKage Mobile) under the 60% component / 40% text layout directive, without breaking compatibility with standard Expo Go (SDK 56).
+
+### A. The Core Mobile Challenge
+Unlike HTML/CSS/JS which execute natively inside standard WebViews with near-zero latency, running Python on mobile presents a major challenge:
+1. **No Native Interpreter:** Mobile OSs cannot run Python scripts directly.
+2. **Binary Bloat:** Embedding native interpreters like Chaquopy (Android) or Python-Apple-Support (iOS) adds 50MB+ to the app bundle and, crucially, **breaks Expo Go completely**, requiring a custom native client.
+3. **Network Dependability:** Pure server-side compilation (Hugging Face / Local Backend) can fail due to connection drops when transmitting large base64 plots, or result in static, non-interactive visual components.
+
+---
+
+### B. Proposed Dual-Engine Architecture (Hybrid Execution)
+
+To achieve both **full offline capability** and **unlimited backend complexity (ML/Deep Learning)**, we propose a **Dual-Engine Execution & Hybrid Rendering Gateway**:
+
+```
+                       ┌─────────────────────────┐
+                       │   VoxKage Model / LLM   │
+                       └────────────┬────────────┘
+                                    │ Generates Python Code or JSON Chart DSL
+                                    ▼
+                       ┌─────────────────────────┐
+                       │   React Native Client   │
+                       └──────┬────────────┬─────┘
+                              │            │
+       Offline / Sandbox      │            │ Heavy Compute / ML / Bridge
+       (Wasm Runtime)         │            │ (Server-Side Execution)
+                              ▼            ▼
+             ┌──────────────────┐        ┌──────────────────┐
+             │ Pyodide WebView  │        │  Laptop Bridge / │
+             │   (Wasm CPython) │        │  HF Space Backend│
+             └────────┬─────────┘        └────────┬─────────┘
+                      │                           │
+                      │ Generates plot            │ Generates static image
+                      │ as Base64/SVG             │ or Plotly JSON
+                      ▼                           ▼
+             ┌──────────────────────────────────────┐
+             │    Interactive Render Components     │
+             │  (Plotly WebView / Native Charts /   │
+             │   Lightbox + Native Save to Gallery) │
+             └──────────────────────────────────────┘
+```
+
+#### 1. Engine A: Client-Side WebAssembly Sandbox (Offline Pyodide)
+* **Concept:** Run a hidden React Native `<WebView>` instance that boots **Pyodide** (CPython compiled to WebAssembly) loaded with data science packages (`numpy`, `pandas`, `matplotlib`, `scikit-learn`).
+* **Execution Flow:**
+  - The client initializes the Pyodide WebView on app startup (cached locally to avoid downloading Wasm binaries repeatedly).
+  - When the model returns a Python execution block, the React Native client injects it into the WebView using `postMessage`.
+  - Pyodide executes the script, captures the Matplotlib figure, and converts it to a Base64 image payload or raw SVG paths.
+  - The WebView streams the graphic back to the parent React Native application.
+* **Pros:** 100% offline, client-side sandboxed execution, does not break Expo Go SDK 56.
+
+#### 2. Engine B: Remote Execution & Bridge Gateway (Online Compute)
+* **Concept:** Use the local laptop bridge (`laptop_bridge.py`) or Hugging Face Space backend to run heavy machine learning tasks (e.g. Scikit-learn training, stock predictions, PyTorch).
+* **Optimization to Avoid Loading Failures:**
+  - Instead of returning massive Base64 strings over WebSockets (which cause socket timeout/drops and result in permanent loading states), the backend writes the generated plot to a persistent volume `/static/` and returns a static HTTP URL `![plot](/static/{id}.png)`.
+  - The mobile client uses an authenticated `ImageWithLoader` that fetches the static path using JWT credentials.
+
+---
+
+### C. 60/40 Premium UI Rendering Layer
+To achieve the 60% component and 40% text layout with high interactivity (zooming, hovering, stock tickers), we will replace static flat images with **Interactive Render WebViews** and **Native Charts**:
+
+1. **Interactive Plotly WebView:**
+   - Instead of Matplotlib outputting a PNG, the script uses `plotly.py` or exports the data as HTML.
+   - The React Native client loads this HTML in an interactive WebView, allowing the user to hover over stock data points, zoom, and pan smoothly.
+2. **Native Chart Component Bridge:**
+   - VoxKage can generate a declarative JSON representation of the chart (using a schema like Vega-Lite).
+   - The React Native app parses this JSON and renders the data using custom React Native components (e.g. `react-native-gifted-charts` or `Victory Native`), providing a native 60fps dark-themed visualization.
+3. **Aesthetic Standards:**
+   - All charts are styled using a premium, tailored dark HSL color palette (e.g., deep slate backgrounds, bright neon blue/emerald green series lines, glassmorphism overlays) to look gorgeous in the chat feed.
+
+---
+
+### D. Implementation Steps
+1. **Update `laptop_bridge.py`** to handle `run_matplotlib_script` locally when the client is running in dev mode, saving execution outputs to a local folder and exposing it through a local HTTP server.
+2. **Embed Pyodide runtime files** in the React Native project assets or load from a reliable, fast CDN, with a local caching mechanism so that offline mode works after the first launch.
+3. **Enhance `MarkdownRenderer.tsx`** to render interactive Plotly and Chart components when receiving specific chart schema tags, instead of defaulting to static images.
+
+
+## 13. PURE NATIVE DECLARATIVE CHARTING ARCHITECTURE (ELIMINATING COMPILATION & WAITING TIMES)
+
+This proposal outlines a 100% client-side, native declarative charting solution to replace server-side Python/Matplotlib execution. By using lightweight, pre-compiled JavaScript charting packages, we achieve instant rendering, offline availability, and high-performance interactive behaviors (gestures, tooltips) directly inside the Expo Go client (SDK 56).
+
+### A. Core Charting Libraries (Expo Go Compatible)
+Instead of compiling python, we leverage React Native libraries built on top of `react-native-svg` and `react-native-reanimated` (both are already installed in `package.json`):
+
+1. **`react-native-gifted-charts` (Recommended for Stock & Financial UI):**
+   - **Features:** Supports smooth, curved line/area charts, stock price graphs with green/red gradients, interactive vertical lines that snap to data points, customized tooltips, and bar/pie/donut charts.
+   - **Performance:** JS-only wrapper on SVGs, compiling in `< 10ms` and running animations at 60fps.
+   - **Styling:** Fully matches the VoxKage premium dark-theme glassmorphism palette via simple CSS/JSON styling properties.
+
+2. **`victory-native` (Recommended for Statistical & ML Graphs):**
+   - **Features:** Industry-standard charting utility. Great for scatters (machine learning classification boundaries), multi-axis trends, statistical distributions, and box plots.
+   - **Performance:** Highly optimized SVG rendering.
+
+---
+
+### B. Instant-Render Workflow (No Wait Times)
+
+Rather than running code asynchronously on a python environment and waiting for an image file, the rendering happens instantaneously:
+
+```
+┌─────────────────────────────────┐
+│       VoxKage Model / LLM       │
+├─────────────────────────────────┤
+│ Streams simple XML/JSON tags:   │
+│ <Chart type="stock"             │
+│   data="105,110,108,115,122"    │
+│   labels="M,T,W,T,F" />         │
+└────────────────┬────────────────┘
+                 │
+                 │ WebSocket Stream (text-only, < 1KB)
+                 ▼
+┌─────────────────────────────────┐
+│     MarkdownRenderer.tsx        │
+├─────────────────────────────────┤
+│ 1. Parses tag regex instantly   │
+│ 2. Extracts data and props      │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│    react-native-gifted-charts   │
+├─────────────────────────────────┤
+│ Renders 60fps interactive UI    │
+│ with gradients & tooltips       │
+└─────────────────────────────────┘
+```
+
+---
+
+### C. Direct Comparison: Matplotlib vs. Native Charting
+
+| Metric | Python Matplotlib (Server / Bridge) | Wasm Pyodide (Client-Side WebView) | Pure Native (Gifted Charts / Victory) |
+|---|---|---|---|
+| **Compilation / Exec Latency** | 3 - 8 seconds | 5 - 10 seconds | **< 10 milliseconds** (Instant) |
+| **Network Dependence** | Required (Backend/Bridge) | Offline First (Requires 20MB cache) | **100% Offline** (Zero cache download) |
+| **Interactivity** | None (Static PNG) | High (SVG / Canvas in WebView) | **Sleek Native Gestures (60fps)** |
+| **Data Payload Size** | Large (50KB+ Base64 or files) | Small (< 1KB code string) | **Microscopic** (< 1KB data string) |
+| **Expo Go Compatibility** | 100% (Renders Image) | 100% (Renders WebView) | **100% (Uses existing SVG dependencies)** |
+| **Use Case Fit** | Unlimited python plotting, custom ML libraries | Unlimited python plotting offline | **95% of standard charts (Line, Bar, Stock, Pie, Scatter)** |
+
+---
+
+### D. Architectural Recommendation
+We recommend **replacing Python-generated Matplotlib entirely for standard visualizations** (stock market charts, general performance trends, simple dataset plots) with the **Pure Native Declarative Charting** approach using `react-native-gifted-charts` because:
+1. It eliminates the latency and complications of backend bridge compilation.
+2. It achieves the **60% component and 40% text layout** instantly, keeping the UX feeling premium, responsive, and alive.
+3. For the remaining 5% of advanced visualizations (e.g. Scikit-learn decision boundaries, dense heatmaps, custom seaborn layouts), VoxKage can fallback to the server static file generator (`run_matplotlib_script`) without blocking standard interactions.

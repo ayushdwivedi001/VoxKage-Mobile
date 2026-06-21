@@ -751,21 +751,6 @@ TOOLS_SCHEMA = [
             }
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_matplotlib_script",
-            "description": "Execute a Python script containing matplotlib plotting commands, capture the resulting figure, and return it as a base64-encoded markdown image tag directly in the chat response. Use this when the user requests a chart, plot, regression line, or machine learning visualization. The code should plot on plt (matplotlib.pyplot) and do NOT call plt.show() or plt.savefig() as the tool will capture and close the plot automatically.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "code": {"type": "string", "description": "The python code containing matplotlib/numpy/pandas/scikit-learn operations and plotting commands (e.g. plt.plot(...))."},
-                    "title": {"type": "string", "description": "A short descriptive title for the image alt text."}
-                },
-                "required": ["code", "title"]
-            }
-        }
-    },
     # --- Mobile Device Control Tools ---
     {
         "type": "function",

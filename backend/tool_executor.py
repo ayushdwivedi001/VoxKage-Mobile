@@ -66,8 +66,6 @@ def get_tool_label(name: str, args: dict) -> str:
         return f"Create File: {args.get('filename', '')}"
     elif name == "convert_file":
         return f"Convert: {args.get('file_path', '')}"
-    elif name == "run_matplotlib_script":
-        return "Generate Chart"
     elif name.startswith("workspace_"):
         parts = name.split("_")
         action = parts[1].capitalize() if len(parts) > 1 else name
@@ -75,53 +73,6 @@ def get_tool_label(name: str, args: dict) -> str:
         return f"{action} file: {file_path}"
     else:
         return name.replace("_", " ").title()
-
-
-def run_matplotlib_script(code: str, title: str) -> str:
-    """
-    Executes a matplotlib python script, captures the active plot,
-    saves it to disk, and returns a markdown image tag pointing to the static path.
-    """
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import uuid
-    import os
-    from file_handler import UPLOAD_DIR
-
-    loc = {}
-    try:
-        # Pre-set style for premium dark layout matching app theme
-        plt.style.use('dark_background')
-        
-        import numpy as np
-        import pandas as pd
-        import sklearn
-        
-        exec_globals = {
-            "plt": plt,
-            "np": np,
-            "pd": pd,
-            "sklearn": sklearn,
-            "__builtins__": __builtins__
-        }
-        
-        exec(code, exec_globals, loc)
-        
-        if not plt.get_fignums():
-            return "Error: The code ran successfully but did not create any matplotlib figure/plot, Sir."
-            
-        filename = f"matplotlib_{uuid.uuid4().hex}.png"
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        
-        # Save to upload dir
-        plt.savefig(file_path, format='png', bbox_inches='tight', transparent=True, dpi=160)
-        plt.close('all')
-        
-        return f"![{title}](/static/{filename})"
-    except Exception as e:
-        plt.close('all')
-        return f"Error executing plotting code: {str(e)}"
 
 
 def fetch_images_for_query(query: str, limit: int = 5) -> str:
