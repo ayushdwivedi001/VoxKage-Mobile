@@ -1,5 +1,54 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated, Modal } from 'react-native';
+
+// --- Dedicated Static Require Helpers to prevent Metro build/compilation errors ---
+const getFileSystem = () => {
+  try { return require('expo-file-system'); } catch { return null; }
+};
+const getMediaLibrary = () => {
+  try { return require('expo-media-library'); } catch { return null; }
+};
+
+const saveBase64Image = async (base64String: string) => {
+  try {
+    const FileSystem = getFileSystem();
+    const MediaLibrary = getMediaLibrary();
+
+    if (!FileSystem || !MediaLibrary) {
+      Clipboard.setString(base64String);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Image data copied to clipboard, Sir', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Success', 'Image data copied to clipboard, Sir.');
+      }
+      return;
+    }
+
+    const base64Data = base64String.replace(/^data:image\/\w+;base64,/, '');
+    const filename = `matplotlib_${Date.now()}.png`;
+    const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+
+    await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status === 'granted') {
+      await MediaLibrary.createAssetAsync(fileUri);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Image saved to Gallery, Sir!', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Saved', 'Image saved to Gallery, Sir!');
+      }
+    } else {
+      Alert.alert('Permission Denied', 'Permission to access media library was denied, Sir.');
+    }
+  } catch (err: any) {
+    console.error('Failed to save image:', err);
+    Alert.alert('Error', `Failed to save image, Sir. Error: ${err.message}`);
+  }
+};
+
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
@@ -322,8 +371,95 @@ function ChartComponent({ type, dataString, labelsString }: { type: string; data
   );
 }
 
+// --- Robust Image With Loading Indicator & Error Fallback Component ---
+interface ImageWithLoaderProps {
+  uri: string;
+  alt: string;
+  style: any;
+  resizeMode?: 'cover' | 'contain' | 'stretch';
+  onPress?: () => void;
+}
+
+function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress }: ImageWithLoaderProps) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const isBase64 = uri.startsWith('data:image/');
+
+  let headers: Record<string, string> = {};
+  if (uri && !isBase64) {
+    try {
+      const match = uri.match(/^(https?:\/\/[^\/]+)/);
+      if (match) {
+        headers['Referer'] = match[1] + '/';
+        headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      }
+    } catch (e) {
+      console.log('Error parsing origin for referer headers:', e);
+    }
+  }
+
+  return (
+    <TouchableOpacity onPress={onPress} disabled={loading || error || !onPress} style={style}>
+      <View style={[styles.imageWrapper, style]}>
+        {!error ? (
+          <Image
+            source={{ uri, headers }}
+            style={[style, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}
+            resizeMode={resizeMode}
+            onLoadStart={() => setLoading(true)}
+            onLoadEnd={() => setLoading(false)}
+            onError={() => {
+              setError(true);
+              setLoading(false);
+            }}
+          />
+        ) : (
+          <View style={styles.imageErrorContainer}>
+            <Ionicons name="image-outline" size={28} color="#ef4444" style={{ marginBottom: 4 }} />
+            <Text style={styles.imageErrorText} numberOfLines={1}>Failed to load visual component, Sir.</Text>
+            {isBase64 ? (
+              <Text style={styles.imageErrorSubtext}>Corrupted base64 chart data.</Text>
+            ) : (
+              <Text style={styles.imageErrorSubtext} numberOfLines={1}>{alt || uri}</Text>
+            )}
+          </View>
+        )}
+
+        {loading && !error && (
+          <View style={styles.imageLoadingContainer}>
+            <ActivityIndicator size="small" color="#3b82f6" />
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// --- Standalone Markdown Image Block Component ---
+interface MarkdownImageProps {
+  uri: string;
+  alt: string;
+  onPressImage?: (uri: string, alt?: string) => void;
+}
+
+function MarkdownImage({ uri, alt, onPressImage }: MarkdownImageProps) {
+  return (
+    <View style={styles.imageCard}>
+      {alt ? <Text style={styles.imageCardTitle}>{alt}</Text> : null}
+      <ImageWithLoader
+        uri={uri}
+        alt={alt}
+        style={styles.markdownImage}
+        resizeMode="contain"
+        onPress={onPressImage ? () => onPressImage(uri, alt) : undefined}
+      />
+    </View>
+  );
+}
+
 // --- Image & Gallery Swipable Carousel Component ---
-function CarouselComponent({ imagesString }: { imagesString: string }) {
+function CarouselComponent({ imagesString, onPressImage }: { imagesString: string; onPressImage?: (uri: string, alt?: string) => void }) {
   const imageUrls = imagesString.split(',').map(url => url.trim()).filter(url => url);
   const [activeIndex, setActiveIndex] = useState(0);
   const [containerWidth, setContainerWidth] = useState(280);
@@ -353,10 +489,12 @@ function CarouselComponent({ imagesString }: { imagesString: string }) {
       >
         {imageUrls.map((url, idx) => (
           <View key={`img-slide-${idx}`} style={{ width: containerWidth, height: 180 }}>
-            <Image
-              source={{ uri: url }}
+            <ImageWithLoader
+              uri={url}
+              alt={`Slide ${idx + 1}`}
               style={styles.carouselImage}
               resizeMode="cover"
+              onPress={onPressImage ? () => onPressImage(url, `Slide ${idx + 1}`) : undefined}
             />
           </View>
         ))}
@@ -377,6 +515,7 @@ function CarouselComponent({ imagesString }: { imagesString: string }) {
     </View>
   );
 }
+
 
 // --- Weather Premium Light-Theme Card ---
 interface WeatherComponentProps {
@@ -565,7 +704,12 @@ function DrillQuestionComponent({ id, question, optionsString, current, total, o
 }
 
 // --- Tag-Based Custom Component Parser ---
-function parseCustomComponents(text: string, keyPrefix: string, onDrillAnswer?: (answer: string) => void) {
+function parseCustomComponents(
+  text: string, 
+  keyPrefix: string, 
+  onDrillAnswer?: (answer: string) => void,
+  onPressImage?: (uri: string, alt?: string) => void
+) {
   const componentTagRegex = /<(LinkCard|Map|ButtonRow|Chart|Carousel|Weather|TaskList|DrillQuestion)\b([^>]*?)\/>/g;
   const elements = [];
   let lastIndex = 0;
@@ -579,7 +723,7 @@ function parseCustomComponents(text: string, keyPrefix: string, onDrillAnswer?: 
     if (textBefore.trim()) {
       elements.push(
         <View key={`text-${keyPrefix}-${match.index}`} style={styles.textContainer}>
-          {renderTextWithInlineFormatting(textBefore)}
+          {renderTextWithInlineFormatting(textBefore, onPressImage)}
         </View>
       );
     }
@@ -629,6 +773,7 @@ function parseCustomComponents(text: string, keyPrefix: string, onDrillAnswer?: 
         <FadeInView key={`component-${keyPrefix}-${match.index}`}>
           <CarouselComponent
             imagesString={attrs.images || ''}
+            onPressImage={onPressImage}
           />
         </FadeInView>
       );
@@ -675,7 +820,7 @@ function parseCustomComponents(text: string, keyPrefix: string, onDrillAnswer?: 
   if (textAfter.trim()) {
     elements.push(
       <View key={`text-${keyPrefix}-end`} style={styles.textContainer}>
-        {renderTextWithInlineFormatting(textAfter)}
+        {renderTextWithInlineFormatting(textAfter, onPressImage)}
       </View>
     );
   }
@@ -683,12 +828,50 @@ function parseCustomComponents(text: string, keyPrefix: string, onDrillAnswer?: 
   return elements;
 }
 
+
 interface MarkdownRendererProps {
   text: string;
   onDrillAnswer?: (answer: string) => void;
 }
 
 export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps) {
+  const [activeImage, setActiveImage] = useState<{ uri: string; alt?: string } | null>(null);
+  const [scaleAnim] = useState(() => new Animated.Value(0.9));
+  const [opacityAnim] = useState(() => new Animated.Value(0));
+
+  const handlePressImage = (uri: string, alt?: string) => {
+    setActiveImage({ uri, alt });
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+  };
+
+  const handleCloseLightbox = () => {
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 0.9,
+        duration: 200,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start(() => {
+      setActiveImage(null);
+    });
+  };
+
   if (!text) return null;
 
   // Split content by code blocks: ```[language] ... ```
@@ -713,7 +896,7 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
 
     // Render plain text and dynamic components before code block
     if (textBefore.trim()) {
-      elements.push(...parseCustomComponents(textBefore, `before-${match.index}`, onDrillAnswer));
+      elements.push(...parseCustomComponents(textBefore, `before-${match.index}`, onDrillAnswer, handlePressImage));
     }
 
     // Render code block with VS Code syntax highlighting
@@ -742,11 +925,105 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
   // Render remaining text after last code block
   const textAfter = text.substring(lastIndex);
   if (textAfter.trim()) {
-    elements.push(...parseCustomComponents(textAfter, 'end', onDrillAnswer));
+    elements.push(...parseCustomComponents(textAfter, 'end', onDrillAnswer, handlePressImage));
   }
 
-  return <View style={styles.container}>{elements}</View>;
+  return (
+    <View style={styles.container}>
+      {elements}
+
+      <Modal
+        visible={activeImage !== null}
+        transparent={true}
+        animationType="none"
+        onRequestClose={handleCloseLightbox}
+      >
+        {activeImage && (
+          <Animated.View style={[styles.lightboxContainer, { opacity: opacityAnim }]}>
+            <TouchableOpacity 
+              activeOpacity={1} 
+              onPress={handleCloseLightbox} 
+              style={styles.lightboxBackdrop} 
+            />
+            
+            <TouchableOpacity onPress={handleCloseLightbox} style={styles.lightboxCloseButton}>
+              <Ionicons name="close" size={24} color="#ffffff" />
+            </TouchableOpacity>
+
+            <Animated.View style={[styles.lightboxImageContainer, { transform: [{ scale: scaleAnim }] }]}>
+              {Platform.OS === 'ios' ? (
+                <ScrollView
+                  maximumZoomScale={3}
+                  minimumZoomScale={1}
+                  showsHorizontalScrollIndicator={false}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
+                >
+                  <Image
+                    source={{ uri: activeImage.uri }}
+                    style={styles.lightboxImage}
+                    resizeMode="contain"
+                  />
+                </ScrollView>
+              ) : (
+                <Image
+                  source={{ uri: activeImage.uri }}
+                  style={styles.lightboxImage}
+                  resizeMode="contain"
+                />
+              )}
+            </Animated.View>
+
+            <View style={styles.lightboxBottomBar}>
+              {activeImage.alt ? (
+                <Text style={styles.lightboxTitle} numberOfLines={2}>
+                  {activeImage.alt}
+                </Text>
+              ) : null}
+              
+              <View style={styles.lightboxButtons}>
+                {activeImage.uri.startsWith('data:image/') ? (
+                  <TouchableOpacity 
+                    onPress={() => saveBase64Image(activeImage.uri)} 
+                    style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
+                  >
+                    <Ionicons name="download-outline" size={16} color="#ffffff" />
+                    <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
+                      Save to Gallery
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity 
+                      onPress={() => WebBrowser.openBrowserAsync(activeImage.uri)} 
+                      style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
+                    >
+                      <Ionicons name="open-outline" size={16} color="#ffffff" />
+                      <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
+                        Source Link
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      onPress={() => Clipboard.setString(activeImage.uri)} 
+                      style={styles.lightboxButton}
+                    >
+                      <Ionicons name="copy-outline" size={16} color="#e2e8f0" />
+                      <Text style={styles.lightboxButtonText}>
+                        Copy Link
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            </View>
+          </Animated.View>
+        )}
+      </Modal>
+    </View>
+  );
 }
+
 
 // VS Code style syntax highlighter
 function highlightVSCode(code: string, language: string) {
@@ -927,7 +1204,10 @@ function renderTable(tableLines: string[], keyBase: number) {
   );
 }
 
-function renderTextWithInlineFormatting(rawText: string) {
+function renderTextWithInlineFormatting(
+  rawText: string,
+  onPressImage?: (uri: string, alt?: string) => void
+) {
   const lines = rawText.split('\n');
   const renderedElements = [];
   
@@ -1001,6 +1281,76 @@ function renderTextWithInlineFormatting(rawText: string) {
       } else if (line.trim() === '') {
         renderedElements.push(<View key={`empty-${i}`} style={styles.emptyLine} />);
       } else {
+        // Detect incomplete image markdown streaming (data:image or http/https)
+        const incompleteMatch = line.match(/(.*?)!\[([^\]]*?)\]\((data:image\/[^)]*|https?:\/\/[^)]*)$/);
+        if (incompleteMatch) {
+          const textBefore = incompleteMatch[1];
+          const alt = incompleteMatch[2];
+          
+          if (textBefore.trim()) {
+            renderedElements.push(
+              <FadeInView key={`line-text-before-${i}`}>
+                <Text style={styles.bodyText}>
+                  {renderInlineSpans(textBefore)}
+                </Text>
+              </FadeInView>
+            );
+          }
+          
+          renderedElements.push(
+            <FadeInView key={`img-stream-placeholder-${i}`}>
+              <View style={styles.imagePlaceholderCard}>
+                <ActivityIndicator size="small" color="#3b82f6" style={{ marginRight: 8 }} />
+                <Text style={styles.imagePlaceholderText}>
+                  Rendering visual content: {alt || 'Image'}...
+                </Text>
+              </View>
+            </FadeInView>
+          );
+          
+          i++;
+          continue;
+        }
+
+        // Detect fully-closed image tags in standard text
+        const hasImage = line.includes('![') && line.includes('](');
+        if (hasImage) {
+          const lineParts = line.split(/(!\[[^\]]*?\]\([^)]+?\))/g);
+          let renderedAny = false;
+          lineParts.forEach((part, partIdx) => {
+            if (part === '') return;
+            
+            const imgMatch = part.match(/^!\[(.*?)\]\((.*?)\)$/);
+            if (imgMatch) {
+              const alt = imgMatch[1];
+              const uri = imgMatch[2];
+              renderedElements.push(
+                <FadeInView key={`img-complete-${i}-${partIdx}`}>
+                  <MarkdownImage
+                    uri={uri}
+                    alt={alt}
+                    onPressImage={onPressImage}
+                  />
+                </FadeInView>
+              );
+              renderedAny = true;
+            } else if (part.trim() !== '') {
+              renderedElements.push(
+                <FadeInView key={`line-part-${i}-${partIdx}`}>
+                  <Text style={styles.bodyText}>
+                    {renderInlineSpans(part)}
+                  </Text>
+                </FadeInView>
+              );
+              renderedAny = true;
+            }
+          });
+          if (renderedAny) {
+            i++;
+            continue;
+          }
+        }
+
         renderedElements.push(
           <FadeInView key={`line-${i}`}>
             <Text style={styles.bodyText}>
@@ -1016,6 +1366,7 @@ function renderTextWithInlineFormatting(rawText: string) {
   
   return renderedElements;
 }
+
 
 function renderInlineSpans(text: string) {
   const inlineRegex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
@@ -1613,6 +1964,175 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     fontSize: 13.5,
     fontWeight: '600',
+  },
+
+  // Image and Lightbox styles
+  imageCard: {
+    backgroundColor: '#0c0c0c',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#171717',
+    padding: 12,
+    marginVertical: 8,
+    width: '100%',
+  },
+  imageCardTitle: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+    letterSpacing: 0.2,
+  },
+  imageTouch: {
+    width: '100%',
+  },
+  imageWrapper: {
+    position: 'relative',
+    height: 200,
+    width: '100%',
+    backgroundColor: '#000000',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  markdownImage: {
+    width: '100%',
+    height: '100%',
+  },
+  imageErrorContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#0a0d14',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ef4444',
+  },
+  imageErrorText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  imageErrorSubtext: {
+    color: '#64748b',
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: 'center',
+    width: '90%',
+  },
+  imageLoadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#05070c',
+  },
+  imagePlaceholderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0c0c0c',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#171717',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginVertical: 8,
+  },
+  imagePlaceholderText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  lightboxContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(3, 7, 18, 0.98)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(3, 7, 18, 0.98)',
+  },
+  lightboxImageContainer: {
+    width: '100%',
+    height: '70%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '100%',
+  },
+  lightboxCloseButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 30,
+    right: 20,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  lightboxBottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(9, 13, 24, 0.95)',
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    alignItems: 'center',
+  },
+  lightboxTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  lightboxButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  lightboxButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1e293b',
+    borderColor: '#334155',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  lightboxButtonPrimary: {
+    backgroundColor: '#2563eb',
+    borderColor: '#2563eb',
+  },
+  lightboxButtonText: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  lightboxButtonTextPrimary: {
+    color: '#ffffff',
   },
 });
 

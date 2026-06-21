@@ -37,7 +37,7 @@ from workspace_helpers import (
     ensure_active_project
 )
 from hud_parser import HudStreamParser
-from tool_executor import get_tool_label, run_matplotlib_script
+from tool_executor import get_tool_label, run_matplotlib_script, fetch_images_for_query
 from system_prompt import BASE_SYSTEM_PROMPT
 
 # Shared laptop responses channel: { email: asyncio.Future }
@@ -175,10 +175,32 @@ async def run_agentic_loop(
                 final_files = get_workspace_files_dict(final_project_id)
                 if final_files:
                     from database import save_playground_project
+                    current_name = final_project.get("name", "Workspace Project")
+                    
+                    is_default_name = (
+                        current_name == "Workspace Project" or
+                        current_name == "New Live App" or
+                        current_name == "New Chat" or
+                        current_name.startswith("Playground -")
+                    )
+                    
+                    project_name = current_name
+                    if is_default_name:
+                        import re
+                        html_content = final_files.get("index.html", "")
+                        title_match = re.search(r"<title>(.*?)</title>", html_content, re.IGNORECASE | re.DOTALL)
+                        if title_match:
+                            parsed_title = title_match.group(1).strip()
+                            generic_titles = {"preview", "index", "home", "document", "html", "untitled", "untitled document", "app", "my app", "my project", "workspace project", "new live app", "new chat"}
+                            if parsed_title and parsed_title.lower() not in generic_titles:
+                                project_name = parsed_title
+                                if isinstance(final_project, dict):
+                                    final_project["name"] = project_name
+                                
                     save_playground_project(
                         user_id=user_id,
                         project_id=final_project_id,
-                        name=final_project.get("name", "Workspace Project"),
+                        name=project_name,
                         html=final_files.get("index.html", ""),
                         css=final_files.get("style.css", ""),
                         js=final_files.get("script.js", ""),
@@ -614,6 +636,8 @@ async def _run_agentic_loop_impl(
                         announcement = f"\n*[Checking syntax for: {args.get('file_path', '')}...]*\n\n"
                     elif name == "run_matplotlib_script":
                         announcement = f"\n*[Generating professional chart using Matplotlib...]*\n\n"
+                    elif name == "fetch_images_for_query":
+                        announcement = f"\n*[Searching for authentic source images: {args.get('query', '')}...]*\n\n"
                     else:
                         announcement = f"\n*[Executing tool: {name}...]*\n\n"
 
@@ -714,6 +738,11 @@ async def _run_agentic_loop_impl(
                             t = args.get("title", "chart")
                             if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Running Matplotlib script..."}))
                             tool_output = run_matplotlib_script(c, t)
+                        elif name == "fetch_images_for_query":
+                            q = args.get("query", "")
+                            lim = args.get("limit", 5)
+                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching images for: {q}"}))
+                            tool_output = fetch_images_for_query(q, lim)
 
                         # --- Memory & RAG ---
                         elif name == "query_rag":

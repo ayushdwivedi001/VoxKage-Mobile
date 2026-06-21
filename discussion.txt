@@ -1,321 +1,56 @@
-# ====================================================================
-# VOXKAGE MOBILE — FULLY AGENTIC MULTI-TASK ARCHITECTURE DISCUSSION
-# ====================================================================
-# Date: 2026-06-20
-# Author: VoxKage Cognitive Core & Antigravity IDE
-# Status: Open for Review
-# Target: c:/Users/AYUSH/Desktop/VoxKage Mobile/discussion.txt
-# ====================================================================
-
-This document outlines the detailed architectural blueprint, protocol specifications, and UX/UI mockups to transition VoxKage Mobile from a standard single-turn chatbot to a fully autonomous, multi-tasking agentic OS companion.
 
 ---
 
-## 1. THE VISION: FULLY AGENTIC OS CONTROL
+## 10. VISUAL IMMERSION & COMPONENT ENHANCEMENTS (NEW DISCUSSION)
 
-A truly agentic mobile companion must replicate the raw multi-tool orchestration of desktop CLI developers, but inside a gorgeous, unified, and immersive mobile interface. 
+This section maps out the proposed architecture for rendering Matplotlib charts, fetching authentic images for free, and maintaining a strict 60/40 component-to-text ratio to deliver a visual-first chat interface.
 
-### Comparison: Generic Bot vs. VoxKage Agentic Engine
-* **Generic Bot:** User asks for 3 things -> Bot addresses the first thing, forgets the rest, or writes a text wall saying what it *will* do without executing.
-* **VoxKage Agentic Engine:** User asks: *"Look for the latest FitGirl repack games, gather details, SMS my brother that it is out, check my phone battery, and add a calendar event."* -> The model parses this query into an execution graph, runs web scraping, phone API tool calls, and messaging sub-agents concurrently or in sequence, and updates the user visually at each stage.
-
----
-
-## 2. THE FOUR ARCHITECTURAL PILLARS
-
-To make this happen, we must implement four major shifts in the codebase:
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        1. AGENTIC GRAPH ROUTER                         │
-│   Parses complex queries into parallel/sequential execution pipelines.   │
-└───────────────────────────────────────────────────┬────────────────────┘
-                                                    │
-                                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                       2. WS PROGRESS PROTOCOL                          │
-│   Streams live progress updates (tool plans, start, success, fail).    │
-└───────────────────────────────────────────────────┬────────────────────┘
-                                                    │
-                                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   3. SVG WORKFLOW PATHING COMPONENT                    │
-│   Renders live-ticking SVG paths, node transitions, and progress.      │
-└───────────────────────────────────────────────────┬────────────────────┘
-                                                    │
-                                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   4. UNIFIED ACCORDION & PREVIEW CARDS                 │
-│   Collapsible thinking, link carousels, and visual resource graphs.    │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. PILLAR A: THE AGENTIC GRAPH ROUTER & PARALLEL EXECUTION (BACKEND)
-
-Currently, `backend/agent_loop.py` handles tool calls in a linear loop: one tool call is returned by the LLM, the python loop runs it, feeds it back to the model, and repeats until the model decides to stop. 
-
-### Proposed Upgrade: Graph Execution Plan
-To support parallel and complex multi-tasking, we will restructure the agent loop to utilize structured graph routing:
-
-1. **Pre-Planning Stage:** The model receives the user request and generates an execution plan consisting of multiple tasks:
-   * **Task 1:** WebSearch (Query: "Fitgirl repacks latest releases 2026")
-   * **Task 2:** System Status (Battery check)
-   * **Task 3 (Dependent on 1):** SMS Message (Recipient: Brother, Content: "Game X is out")
-   * **Task 4:** Calendar Event (Title: "Interview", Time: "June 21, 5:00 PM")
-2. **Concurrency Manager (`asyncio.gather`):** Tasks that are independent (e.g. WebSearch, Battery check, Calendar event) are dispatched **in parallel** to maximize speed.
-3. **Dependency Resolver:** Tasks that require outputs from previous tasks (e.g. SMS needs the game name from the FitGirl search) are queued to execute immediately after their dependencies complete.
-
-### Python Backend Code Structure (`backend/agent_loop.py` mock-up)
-```python
-import asyncio
-from typing import List, Dict, Any
-
-class AgentExecutionGraph:
-    def __init__(self, plan_nodes: List[Dict[str, Any]]):
-        self.nodes = plan_nodes  # List of node dicts with dependencies
-        self.results = {}
-        self.active_tasks = {}
-
-    async def execute_node(self, node_id: str, ws_connection):
-        node = self.nodes[node_id]
-        
-        # 1. Wait for dependencies to finish
-        for dep in node.get("dependencies", []):
-            while dep not in self.results:
-                await asyncio.sleep(0.1)
-        
-        # 2. Extract parameters, substituting dependencies if needed
-        resolved_args = self.resolve_parameters(node["args"], self.results)
-        
-        # 3. Notify client: Tool starting
-        await ws_connection.send_json({
-            "type": "tool_start",
-            "node_id": node_id,
-            "tool_name": node["tool_name"],
-            "label": node["label"]
-        })
-        
-        # 4. Run tool
-        try:
-            result = await execute_tool(node["tool_name"], resolved_args)
-            self.results[node_id] = result
-            
-            # 5. Notify client: Tool success
-            await ws_connection.send_json({
-                "type": "tool_success",
-                "node_id": node_id,
-                "result_summary": summarize_result(result)
-            })
-        except Exception as e:
-            self.results[node_id] = {"error": str(e)}
-            # Notify client: Tool failed
-            await ws_connection.send_json({
-                "type": "tool_failed",
-                "node_id": node_id,
-                "error": str(e)
-            })
-
-    async def run(self, ws_connection):
-        # Dispatch independent nodes in parallel
-        tasks = [
-            asyncio.create_task(self.execute_node(node_id, ws_connection))
-            for node_id in self.nodes
-        ]
-        await asyncio.gather(*tasks)
-```
-
----
-
-## 4. PILLAR B: THE WEBSOCKET PROGRESS PROTOCOL (COMMUNICATION)
-
-To support real-time UI updates, the WebSocket connection in `backend/main.py` needs to stream granular events.
-
-### Streamed Message Types
-* `tool_plan`: Sent at the start of the query to outline the workflow. Contains the list of nodes, labels, and connections.
-  ```json
-  {
-    "type": "tool_plan",
-    "nodes": [
-      {"id": "node_1", "label": "Search Fitgirl Repacks", "tool": "web_search"},
-      {"id": "node_2", "label": "Check Battery Status", "tool": "mobile_get_battery"},
-      {"id": "node_3", "label": "SMS Brother", "tool": "mobile_send_sms", "dependencies": ["node_1"]},
-      {"id": "node_4", "label": "Schedule Calendar Event", "tool": "mobile_add_calendar"}
-    ]
-  }
+### A. Matplotlib Rendering Failure: Root Cause & Solution
+* **The Problem:** The `run_matplotlib_script` tool executes perfectly and returns a base64 markdown image: `![title](data:image/png;base64,...)`. However, `MarkdownRenderer.tsx` lacks parsing for `![alt](url)` markdown images. As a result, the base64 string is rendered as plain text or ignored entirely.
+* **The Solution:** Update `renderTextWithInlineFormatting()` and `renderInlineSpans()` in the frontend parser to match the markdown image syntax:
+  ```typescript
+  const imageRegex = /!\[(.*?)\]\((.*?)\)/g;
   ```
-* `tool_start`: Emitted when a specific node begins execution.
-* `tool_success` / `tool_failed`: Emitted when a node completes, enabling the frontend to check off items in the SVG graph.
-* `agent_thought`: Streams the model's inner thoughts to be displayed inside the collapsible accordion drawer.
+  When matched, map it to a custom `MarkdownImage` component styled to display base64 data URIs and external links natively with a dark-background container card.
 
----
+### B. Free & Authentic Image Fetching Strategies (Zero Cost API)
+To fetch authentic images for entities (e.g. fish species, historical figures, cities) instead of generic placeholders:
+1. **DuckDuckGo Image Scraper (Dynamic Backend Fetching)**:
+   - Create a backend utility tool (e.g., `fetch_image_urls(query: str, count: int = 5) -> List[str]`).
+   - Query DuckDuckGo's vqd/JSON endpoint (e.g., `https://duckduckgo.com/d.js` or scraper endpoints) to dynamically parse clean, unauthenticated image URLs directly from the web during tools execution.
+2. **Wikipedia & Wikimedia Commons API (Unauthenticated & Free)**:
+   - Wikipedia's media API is free, fast, and does not require an API key.
+   - For a query like *"Gobiocichla wonderi"*, query `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages|pageterms&titles=...&format=json&piprop=original` to retrieve the original high-resolution photo from Wikimedia.
+3. **Integration in Agent Loop**:
+   - The backend Agent can automatically chain a `fetch_images` step when compiling lists of visual subjects, passing the URLs directly into a `<Carousel images="url1,url2..." />` custom component.
 
-## 5. PILLAR C: SVG WORKFLOW PATHING COMPONENT (FRONTEND)
+### C. The 60% Components / 40% Text Ratio Enforcement
+To stop VoxKage from relying on generic text walls, we will update the system prompt in `backend/system_prompt.py`:
+* **The 60/40 Composition Rule**: Enforce that at least 60% of the screen space (components ratio) must consist of visual UI widgets:
+  - `<Carousel images="..." />` for galleries or lists of subjects.
+  - `<Chart type="bar|line" data="..." labels="..." />` for statistics/comparisons.
+  - `<TaskList items="..." />` for progressive operations.
+  - Collapsible `<Table>` layouts for data properties.
+* **Conciseness Directive**: Plain text paragraphs are restricted to brief summaries and transitions, representing at most 40% of the response.
 
-Instead of outputting text logs, the chat feed will display a custom React Native component: `ToolWorkflowPath`.
+### D. Immersive UI Enhancements: Lightbox & Zoom Transitions
+1. **Interactive Image Modal (Lightbox)**:
+   - Wrap all images (standalone markdown images and carousel slides) in a `TouchableOpacity`.
+   - Clicking an image opens a full-screen React Native `Modal` displaying a dark overlay.
+   - Use React Native's `Animated` library to scale the image up smoothly.
+2. **Meta Details & Source Linking**:
+   - Underneath the zoomed image, display the title, description, and an editorial "Source Link" button.
+   - Example:
+     ```
+     ┌──────────────────────────────────────────────────┐
+     │                      [Image]                     │
+     │                                                  │
+     │  "Gobiocichla wonderi (Wonder's cichlid)"        │
+     │  Discovered in the Niger River basin.            │
+     │                                                  │
+     │  [ Visit Wikipedia Source ]                      │
+     └──────────────────────────────────────────────────┘
+     ```
+3. **Smooth Swipe Carousel**:
+   - Improve the existing `CarouselComponent` with smoother scroll gesture response, snapping physics, and clear dot page indicators.
 
-### Visual Design
-* A clean, vertical or horizontal timeline rendered using React Native SVG (`react-native-svg`).
-* Uncompleted tasks are drawn as empty circles with 1px gray borders.
-* Active tasks feature an animated spinning glow or a pulsing blue circle.
-* Completed tasks render a solid green/blue circle containing a checkmark (`✓`).
-* Elegant SVG connector lines connect the circles. As tasks complete, the line colors transition from dark gray to bright blue to visually show the path of execution.
-
-```
-       [Start]
-          │ (completed path - bright blue)
-         (✓) Search FitGirl Games
-          │ (completed path - bright blue)
-         (✓) Check Battery Status
-          │ (active path - pulsing glow)
-        (⚙️) SMS Brother
-          │ (pending path - dark gray line)
-         ( ) Schedule Calendar Event
-```
-
-### React Native Component Mockup (`frontend/src/components/chat/ToolWorkflowPath.tsx`)
-```tsx
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import Svg, { Line, Circle } from 'react-native-svg';
-import Animated, { useSharedValue, useAnimatedProps, withTiming } from 'react-native-reanimated';
-import { Ionicons } from '@expo/vector-icons';
-
-interface WorkflowNode {
-  id: string;
-  label: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
-}
-
-interface ToolWorkflowPathProps {
-  nodes: WorkflowNode[];
-}
-
-const AnimatedLine = Animated.createAnimatedComponent(Line);
-
-export const ToolWorkflowPath: React.FC<ToolWorkflowPathProps> = ({ nodes }) => {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>VOXKAGE AGENTIC WORKFLOW</Text>
-      
-      {nodes.map((node, index) => {
-        const isLast = index === nodes.length - 1;
-        const isActive = node.status === 'running';
-        const isSuccess = node.status === 'success';
-        
-        return (
-          <View key={node.id} style={styles.row}>
-            {/* SVG Node Indicator Column */}
-            <View style={styles.svgColumn}>
-              <Svg height="60" width="40">
-                {!isLast && (
-                  <Line
-                    x1="20" y1="30"
-                    x2="20" y2="60"
-                    stroke={isSuccess ? '#3b82f6' : '#262626'}
-                    strokeWidth="2"
-                  />
-                )}
-                <Circle
-                  cx="20" cy="20" r="10"
-                  fill={isSuccess ? '#10b981' : isActive ? '#3b82f6' : '#0f172a'}
-                  stroke={isSuccess ? '#10b981' : isActive ? '#60a5fa' : '#334155'}
-                  strokeWidth="2"
-                />
-              </Svg>
-              {isSuccess && (
-                <View style={styles.iconOverlay}>
-                  <Ionicons name="checkmark" size={10} color="#ffffff" />
-                </View>
-              )}
-            </View>
-
-            {/* Label Column */}
-            <View style={styles.textColumn}>
-              <Text style={[
-                styles.label,
-                isActive && styles.labelActive,
-                isSuccess && styles.labelSuccess
-              ]}>
-                {node.label}
-              </Text>
-              <Text style={styles.subtext}>
-                {node.status.toUpperCase()}
-              </Text>
-            </View>
-          </View>
-        );
-      })}
-    </View>
-  );
-};
-```
-
----
-
-## 6. PILLAR D: COLLAPSIBLE THINKING ACCORDION (UNIFIED UI)
-
-Instead of cluttering the chat history with separate "thinking logs," we will integrate a unified, collapsible accordion component at the **very top** of the assistant's response bubble.
-
-### Interaction Details
-1. **Collapsible Header:** A sleek header bar displaying:
-   * A subtle loader spinner.
-   * A pulsing label showing the active step: e.g., `Searching for TCS office...` or `Checking battery status...`.
-   * A toggle arrow (caret) to expand/collapse.
-2. **Deep-Dive Drawer/Popup:** Clicking on the thinking header expands it in place (as an accordion) or opens a gorgeous modal sheet containing the complete, timestamped history of the agent's thoughts:
-   * `[13:42:01] Parsing user intent: Multi-task workflow detected.`
-   * `[13:42:02] Running 3 parallel searches for TCS offices in Gujarat...`
-   * `[13:42:04] 2 matches found. Executing geolocation mapping...`
-3. **Auto-Minimize:** Once the agent completes all tasks, the thinking section automatically collapses into a subtle, single-line indicator (`✓ Viewed 3 sources & executed 2 tools`) at the top of the message bubble, leaving a clean, distraction-free response.
-
----
-
-## 7. PILLAR E: SHIFTING TO COMPONENT-CENTRIC RESPONSES
-
-To achieve the premium aesthetic requested by Sir, we must restrict plain text responses and enforce the usage of rich, immersive custom components.
-
-### 1. Carousel Cards (e.g. search results, articles, game repacks)
-Instead of a bulleted list of links, we will group items into a horizontally scrollable Carousel of cards featuring:
-* Domain favicon/source brand indicator.
-* Bold title with clean typography.
-* Text snippet.
-* Premium action buttons (e.g., "Open Link", "Scrape Context", "Share").
-
-### 2. Live Resource Previews
-If the agent fetches data from a file or webpage, it will display a file icon component showing file info (similar to the spreadsheet example: `File icon + Title + Type + Size` in a rounded gray pill).
-
-### 3. Customized Map / Location Cards
-For location queries (like TCS offices), it should show a simulated mini-map interface with marker pins and an button to launch deep-linked map routes natively, avoiding plain-text lists of addresses.
-
----
-
-## 8. PROPOSED CHANGES & WORK checklist
-
-To implement this fully agentic upgrade, here is the structural checklist we will execute:
-
-### Step 1: Backend WebSocket Protocol Upgrade
-* Modify `backend/main.py` and `backend/agent_loop.py` to stream:
-  * `tool_plan` when a multi-task query is mapped.
-  * `tool_start` / `tool_success` / `tool_failed` status flags.
-  * Inner thoughts streamed under a new `thought` channel rather than standard chat output.
-
-### Step 2: Implement ToolWorkflowPath Component
-* Create `frontend/src/components/chat/ToolWorkflowPath.tsx` utilizing `react-native-svg`.
-* Export and integrate the component into `ChatFeed.tsx`.
-
-### Step 3: Refactor ChatFeed and Assistant Bubble UI
-* Update `ChatFeed.tsx` to handle the collapsible thinking accordion at the top of the assistant's bubble.
-* Code the popup modal for viewing the detailed thinking history logs.
-* Enhance `MarkdownRenderer` and layout styling to support the custom visual interactive components (Carousels, MapCards, FilePreviews).
-
----
-
-## 9. OPEN QUESTIONS FOR SIR
-
-> [!IMPORTANT]
-> Sir, please review this graph design and let me know your thoughts on the following points:
-> 
-> 1. **Thinking Popup Layout:** Would you prefer the detailed thinking logs to expand inline as an accordion directly inside the message bubble, or open as a slide-up bottom sheet drawer for a cleaner feel?
-> 2. **SVG Workflow Pathing Color Palette:** Should the SVG line connectors use our signature bright blue (`#3b82f6`) matching the premium theme, or a glowing neon green (`#10b981`) for completed steps?
-> 3. **Manual Action Triggers:** When VoxKage executes actions like SMS/Calendar events, should it ask for your confirmation (e.g., a "Confirm Send" button on the screen), or run them completely autonomously in the background?

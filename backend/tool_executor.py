@@ -120,3 +120,89 @@ def run_matplotlib_script(code: str, title: str) -> str:
     except Exception as e:
         plt.close('all')
         return f"Error executing plotting code: {str(e)}"
+
+
+def fetch_images_for_query(query: str, limit: int = 5) -> str:
+    """
+    Fetches authentic image URLs from Wikipedia/Wikimedia Commons API (primary),
+    or Bing Images HTML parser (fallback), or DuckDuckGo (final fallback).
+    Returns a comma-separated list of image URLs, Sir.
+    """
+    import urllib.request
+    import json
+    import re
+    import urllib.parse
+
+    urls = []
+
+    # 1. Wikipedia/Wikimedia Commons API
+    try:
+        search_url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(query)}&format=json"
+        req = urllib.request.Request(search_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            search_results = data.get("query", {}).get("search", [])
+            
+            if search_results:
+                page_titles = [item["title"] for item in search_results[:limit]]
+                for title in page_titles:
+                    img_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&titles={urllib.parse.quote(title)}&piprop=original&format=json"
+                    img_req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(img_req, timeout=3) as img_resp:
+                        img_data = json.loads(img_resp.read().decode('utf-8'))
+                        pages = img_data.get("query", {}).get("pages", {})
+                        for page_id in pages:
+                            orig = pages[page_id].get("original", {})
+                            if orig.get("source"):
+                                urls.append(orig["source"])
+    except Exception as e:
+        print(f"Wikipedia API failed: {e}")
+
+    # 2. Bing Images Scraper (Extremely reliable and high-res!)
+    if len(urls) < limit:
+        try:
+            bing_url = f"https://www.bing.com/images/search?q={urllib.parse.quote(query)}"
+            req = urllib.request.Request(bing_url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+            with urllib.request.urlopen(req, timeout=4) as response:
+                html = response.read().decode('utf-8', errors='ignore')
+                murls = re.findall(r'&quot;murl&quot;:&quot;(http[^&]+)&quot;', html)
+                for mu in murls:
+                    if mu not in urls:
+                        urls.append(mu)
+                        if len(urls) >= limit:
+                            break
+        except Exception as e:
+            print(f"Bing Image scraper failed: {e}")
+
+    # 3. DuckDuckGo Scraper Fallback
+    if len(urls) < limit:
+        try:
+            ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}+images"
+            req = urllib.request.Request(ddg_url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+            with urllib.request.urlopen(req, timeout=4) as response:
+                html = response.read().decode('utf-8', errors='ignore')
+                found_srcs = re.findall(r'src="([^"]*?bing\.net/th[^"]*?)"', html)
+                for src in found_srcs:
+                    full_src = src if src.startswith("http") else "https:" + src
+                    if full_src not in urls:
+                        urls.append(full_src)
+                        if len(urls) >= limit:
+                            break
+        except Exception as e:
+            print(f"DuckDuckGo Image scraper failed: {e}")
+
+    # Deduplicate and limit
+    final_urls = []
+    for u in urls:
+        if u not in final_urls:
+            final_urls.append(u)
+    final_urls = final_urls[:limit]
+
+    if not final_urls:
+        return "Error: No authentic images found for this query, Sir."
+
+    return ",".join(final_urls)

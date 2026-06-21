@@ -99,6 +99,15 @@ export function useWebSocket(
     };
   }, []);
 
+  // Sync projects and activeEditingProjectId states to their refs to prevent stale websocket message handler read values
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
+  useEffect(() => {
+    activeEditingProjectIdRef.current = activeEditingProjectId;
+  }, [activeEditingProjectId]);
+
   const resetPacingRefs = () => {
     if (pacingIntervalRef.current) {
       clearInterval(pacingIntervalRef.current);
@@ -164,23 +173,59 @@ export function useWebSocket(
           setPlaygroundJs(finalJs);
           setPlaygroundRevision((prev) => prev + 1);
 
+          let projName = originalProj.name;
+          const isPlaceholderName =
+            projName === 'Workspace Project' ||
+            projName === 'New Live App' ||
+            projName === 'New Chat' ||
+            projName.startsWith('Playground -');
+
+          if (isPlaceholderName && finalHtml) {
+            const titleMatch = finalHtml.match(/<title>([\s\S]*?)<\/title>/i);
+            if (titleMatch && titleMatch[1]) {
+              const parsedTitle = titleMatch[1].trim();
+              const genericTitles = ['preview', 'index', 'home', 'document', 'html', 'untitled', 'untitled document', 'app', 'my app', 'my project', 'workspace project', 'new live app', 'new chat'];
+              if (parsedTitle && !genericTitles.includes(parsedTitle.toLowerCase())) {
+                projName = parsedTitle;
+                setPlaygroundProjectName(projName);
+              }
+            }
+          }
+
           if (handleSaveProjectRef.current) {
-            await handleSaveProjectRef.current(
-              originalProj.name,
-              finalHtml,
-              finalCss,
-              finalJs,
-              editingId
-            );
+            // Save project asynchronously in the background to prevent UI lockup
+            (async () => {
+              try {
+                await handleSaveProjectRef.current!(
+                  projName,
+                  finalHtml,
+                  finalCss,
+                  finalJs,
+                  editingId
+                );
+              } catch (saveErr) {
+                console.error('[useWebSocket] Error saving playground project in background:', saveErr);
+              }
+            })();
           }
         }
       }
     }
-    if (associatedProjectId) {
-      await loadProjectsRef.current?.(backendUrl, token || '');
-    }
+
+    // Immediately unlock UI loading state and clear thinking status
     setLoading(false);
     setThinkingStatus(null);
+
+    if (associatedProjectId) {
+      // Reload projects asynchronously in the background to prevent UI lockup
+      (async () => {
+        try {
+          await loadProjectsRef.current?.(backendUrl, token || '');
+        } catch (loadErr) {
+          console.error('[useWebSocket] Error reloading projects in background:', loadErr);
+        }
+      })();
+    }
   };
 
   const startPacingLoop = () => {

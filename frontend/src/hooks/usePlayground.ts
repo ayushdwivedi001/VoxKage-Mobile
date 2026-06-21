@@ -241,7 +241,18 @@ export function usePlayground(
     setPlaygroundRevision((prev) => prev + 1);
 
     const session = sessions.find((s) => s.id === currentSessionId);
-    const projName = session ? `Playground - ${session.name}` : 'Playground Preview';
+    let projName = session ? `Playground - ${session.name}` : 'Playground Preview';
+
+    if (htmlCode) {
+      const titleMatch = htmlCode.match(/<title>([\s\S]*?)<\/title>/i);
+      if (titleMatch && titleMatch[1]) {
+        const parsedTitle = titleMatch[1].trim();
+        const genericTitles = ['preview', 'index', 'home', 'document', 'html', 'untitled', 'untitled document', 'app', 'my app', 'my project', 'workspace project', 'new live app', 'new chat'];
+        if (parsedTitle && !genericTitles.includes(parsedTitle.toLowerCase())) {
+          projName = parsedTitle;
+        }
+      }
+    }
 
     const savedId = await handleSaveProject(projName, htmlCode, cssCode, jsCode, existingProjectId);
     if (savedId) {

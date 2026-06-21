@@ -989,5 +989,20 @@ TOOLS_SCHEMA = [
                 }
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_images_for_query",
+            "description": "Search Wikipedia/Wikimedia Commons and DuckDuckGo dynamically for a query, and return a comma-separated list of premium authentic image URLs. Use this to enrich chats with real images of fish, landmarks, movies, or entities, Sir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query description (e.g. 'Gobiocichla cichlid fish')."},
+                    "limit": {"type": "integer", "description": "Maximum number of image URLs to fetch.", "default": 5}
+                },
+                "required": ["query"]
+            }
+        }
     }
 ]
