@@ -719,6 +719,143 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
       return { status: 'mock_success', text: args.text };
     }
 
+    // 15. Web Search, Fetch and Image Search Proxy Routing
+    case 'web_search':
+    case 'web_search_deep': {
+      const query = args.query || '';
+      try {
+        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        });
+        const html = await response.text();
+        const results: any[] = [];
+        const resultBlockRegex = /<div class="result results_links results_links_deep web-result[^"]*">([\s\S]*?)<\/div>\s*<\/div>/g;
+        let match;
+        while ((match = resultBlockRegex.exec(html)) !== null) {
+          const block = match[1];
+          const urlMatch = block.match(/<a class="result__url" href="([^"]+)"/);
+          const titleMatch = block.match(/<a class="result__snippet" href="[^"]+">([\s\S]*?)<\/a>/);
+          const snippetMatch = block.match(/<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+          
+          if (urlMatch) {
+            let url = urlMatch[1];
+            if (url.includes('uddg=')) {
+              const uddgPart = url.split('uddg=')[1]?.split('&')[0];
+              if (uddgPart) {
+                url = decodeURIComponent(uddgPart);
+              }
+            }
+            if (url.startsWith('//')) {
+              url = 'https:' + url;
+            }
+            const cleanText = (str: string) => str.replace(/<[^>]*>/g, '').trim();
+            const title = titleMatch ? cleanText(titleMatch[1]) : 'Search Result';
+            const snippet = snippetMatch ? cleanText(snippetMatch[1]) : '';
+            results.push({ title, url, snippet });
+          }
+        }
+        const limit = args.limit || 8;
+        return results.slice(0, limit);
+      } catch (err: any) {
+        return [{ error: `Mobile web search failed: ${err.message}` }];
+      }
+    }
+
+    case 'web_fetch': {
+      const url = args.url || '';
+      try {
+        const response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        });
+        const html = await response.text();
+        let content = html;
+        const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        if (bodyMatch) {
+          content = bodyMatch[1];
+        }
+        content = content.replace(/<(script|style|nav|footer|header)[^>]*>[\s\S]*?<\/\1>/gi, '');
+        content = content.replace(/<[^>]*>/g, ' ');
+        content = content.replace(/\s+/g, ' ').trim();
+        if (content.length > 30000) {
+          content = content.slice(0, 30000) + "\n\n...[Content truncated due to size limits]...";
+        }
+        return {
+          url,
+          status: response.status,
+          content
+        };
+      } catch (err: any) {
+        return { url, error: `Mobile fetch failed: ${err.message}` };
+      }
+    }
+
+    case 'web_search_parallel': {
+      const queries: string[] = args.queries || [];
+      const tasks = queries.map(q => executeMobileTool('web_search', { query: q }));
+      return Promise.all(tasks);
+    }
+
+    case 'web_fetch_parallel': {
+      const urls: string[] = args.urls || [];
+      const tasks = urls.map(u => executeMobileTool('web_fetch', { url: u }));
+      return Promise.all(tasks);
+    }
+
+    case 'fetch_images_for_query': {
+      const query = args.query || '';
+      const limit = args.limit || 5;
+      try {
+        const response = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json`, {
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        const data = await response.json();
+        const searchResults = data?.query?.search || [];
+        const urls: string[] = [];
+        
+        if (searchResults.length > 0) {
+          const titles = searchResults.slice(0, limit).map((s: any) => s.title);
+          for (const title of titles) {
+            const imgRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&titles=${encodeURIComponent(title)}&piprop=original&format=json`);
+            const imgData = await imgRes.json();
+            const pages = imgData?.query?.pages || {};
+            for (const key in pages) {
+              const src = pages[key]?.original?.source;
+              if (src) urls.push(src);
+            }
+          }
+        }
+        
+        // Bing Fallback
+        if (urls.length < limit) {
+          const bingRes = await fetch(`https://www.bing.com/images/search?q=${encodeURIComponent(query)}`, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            }
+          });
+          const html = await bingRes.text();
+          const matches = [...html.matchAll(/&quot;murl&quot;:&quot;(http[^&]+)&quot;/g)];
+          for (const match of matches) {
+            const murl = match[1];
+            if (murl && !urls.includes(murl)) {
+              urls.push(murl);
+              if (urls.length >= limit) break;
+            }
+          }
+        }
+        
+        if (urls.length === 0) {
+          return "Error: No authentic images found, Sir.";
+        }
+        return urls.slice(0, limit).join(',');
+      } catch (err: any) {
+        return `Error fetching images: ${err.message}`;
+      }
+    }
+
     default:
       throw new Error(`Tool '${name}' is not supported or not implemented, Sir.`);
   }

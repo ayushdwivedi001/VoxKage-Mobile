@@ -30,6 +30,7 @@ import { FluidBackground } from '@/components/chat/FluidBackground';
 import { BtwOverlay } from '@/components/chat/BtwOverlay';
 import { ThinkingLogsModal } from '@/components/chat/ThinkingLogsModal';
 import { SourcesModal } from '@/components/chat/SourcesModal';
+import { StickySvgPathing } from '@/components/chat/StickySvgPathing';
 
 // Modular Hooks
 import { useChatSessions } from '@/hooks/useChatSessions';
@@ -115,6 +116,7 @@ const COMMANDS = [
   { name: '/compact', desc: 'Compress active chat history.' },
   { name: '/btw', desc: 'Ask a quick stateless side-question.' },
   { name: '/drill', desc: 'Initiate structured requirements scoping.' },
+  { name: '/agents', desc: 'Launch a background swarm of agents for a task.' },
 ];
 
 export default function ChatScreen() {
@@ -133,7 +135,7 @@ export default function ChatScreen() {
   ]);
   const [activeModel, setActiveModel] = useState('deepseek-v4-flash-free');
   const VARIANTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
-  const [activeVariantIndex, setActiveVariantIndex] = useState(2); // default High
+  const [activeVariantIndex, setActiveVariantIndex] = useState(4); // default Max
   const [favorites, setFavorites] = useState<string[]>([]);
   const [showModelModal, setShowModelModal] = useState(false);
   const [showVariantDropdown, setShowVariantDropdown] = useState(false);
@@ -644,6 +646,9 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Sticky Swarm Progress Indicator */}
+        <StickySvgPathing task={webSocket.activeSwarmTask} onCancel={webSocket.cancelSwarmTask} />
+
         {/* Chat Feed */}
         {messages.length === 0 && !inputText.trim() && !loading && !streamingText ? (
           <WelcomeGreeting />
@@ -677,6 +682,7 @@ export default function ChatScreen() {
               setActiveSources(sources);
               setIsSourcesDrawerOpen(true);
             }}
+            activeSwarmTask={webSocket.activeSwarmTask}
           />
         )}
 

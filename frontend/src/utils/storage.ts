@@ -184,5 +184,61 @@ export const storage = {
     } catch (e) {
       console.error('Error saving sandbox calendar events', e);
     }
+  },
+
+  async getBridgeMode(): Promise<'laptop' | 'mobile_local'> {
+    try {
+      let mode = '';
+      if (Platform.OS === 'web') {
+        mode = localStorage.getItem('voxkage_bridge_mode') || '';
+      } else {
+        mode = await SecureStore.getItemAsync('voxkage_bridge_mode') || '';
+      }
+      if (mode === 'laptop' || mode === 'mobile_local') {
+        return mode;
+      }
+      return Platform.OS !== 'web' ? 'mobile_local' : 'laptop';
+    } catch {
+      return Platform.OS !== 'web' ? 'mobile_local' : 'laptop';
+    }
+  },
+
+  async setBridgeMode(mode: 'laptop' | 'mobile_local'): Promise<void> {
+    try {
+      if (Platform.OS === 'web') {
+        localStorage.setItem('voxkage_bridge_mode', mode);
+      } else {
+        await SecureStore.setItemAsync('voxkage_bridge_mode', mode);
+      }
+    } catch (e) {
+      console.error('Error saving bridge mode', e);
+    }
+  },
+
+  async getMobileLocalIp(): Promise<string> {
+    try {
+      let ip = '';
+      if (Platform.OS === 'web') {
+        ip = localStorage.getItem('voxkage_mobile_local_ip') || '';
+      } else {
+        ip = await SecureStore.getItemAsync('voxkage_mobile_local_ip') || '';
+      }
+      return ip;
+    } catch {
+      return '';
+    }
+  },
+
+  async setMobileLocalIp(ip: string): Promise<void> {
+    try {
+      if (Platform.OS === 'web') {
+        localStorage.setItem('voxkage_mobile_local_ip', ip.trim());
+      } else {
+        await SecureStore.setItemAsync('voxkage_mobile_local_ip', ip.trim());
+      }
+    } catch (e) {
+      console.error('Error saving mobile local IP', e);
+    }
   }
 };
+

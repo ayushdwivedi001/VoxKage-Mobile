@@ -3,6 +3,7 @@ import { ChatMessage } from '@/components/chat/ChatFeed';
 import { WorkflowNode } from '@/components/chat/ToolWorkflowPath';
 import { ChatSession } from '@/components/chat/SidebarDrawer';
 import { executeMobileTool } from '@/utils/mobileTools';
+import { storage } from '@/utils/storage';
 
 interface StagedAttachment {
   uri: string;
@@ -65,6 +66,19 @@ export function useWebSocket(
   const [streamingText, setStreamingText] = useState('');
   const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
 
+  const [bridgeMode, setBridgeMode] = useState<'laptop' | 'mobile_local'>('laptop');
+  const [mobileLocalIp, setMobileLocalIp] = useState('');
+
+  useEffect(() => {
+    const loadBridgeSettings = async () => {
+      const mode = await storage.getBridgeMode();
+      const ip = await storage.getMobileLocalIp();
+      setBridgeMode(mode);
+      setMobileLocalIp(ip);
+    };
+    loadBridgeSettings();
+  }, [token]);
+
   const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([]);
   const [thinkingLogs, setThinkingLogs] = useState<string[]>([]);
 
@@ -77,6 +91,7 @@ export function useWebSocket(
   const [btwLoading, setBtwLoading] = useState(false);
 
   const [messageProjectIds, setMessageProjectIds] = useState<Record<string, string>>({});
+  const [activeSwarmTask, setActiveSwarmTask] = useState<any | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const wasLastInputVoice = useRef(false);
@@ -335,7 +350,26 @@ export function useWebSocket(
 
           const runProxyQuery = async () => {
             try {
-              const response = await fetch('https://opencode.ai/zen/v1/chat/completions', {
+              let completionsUrl = 'https://opencode.ai/zen/v1/chat/completions';
+              const currentBridgeMode = await storage.getBridgeMode();
+              const currentMobileLocalIp = await storage.getMobileLocalIp();
+              
+              if (currentBridgeMode === 'mobile_local' && currentMobileLocalIp) {
+                let formattedIp = currentMobileLocalIp.trim();
+                if (!formattedIp.startsWith('http')) {
+                  formattedIp = `http://${formattedIp}`;
+                }
+                if (!formattedIp.includes('/chat/completions') && !formattedIp.includes('/v1')) {
+                  completionsUrl = `${formattedIp}/v1/chat/completions`;
+                } else if (formattedIp.includes('/v1') && !formattedIp.includes('/chat/completions')) {
+                  completionsUrl = `${formattedIp}/chat/completions`;
+                } else {
+                  completionsUrl = formattedIp;
+                }
+                console.log(`[Proxy] Routing completions via Mobile Local Bridge IP URL: ${completionsUrl}`);
+              }
+
+              const response = await fetch(completionsUrl, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -516,6 +550,36 @@ export function useWebSocket(
           setConfirmationToolName(data.tool_name);
           setConfirmationToolLabel(data.label || data.tool_name);
           setConfirmationRequestId(data.request_id);
+        } else if (data.type === 'swarm_update') {
+          if (data.session_id === sessionId) {
+            setActiveSwarmTask(data.active_swarm);
+          }
+        } else if (data.type === 'swarm_complete') {
+          if (data.session_id === sessionId) {
+            setActiveSwarmTask(null);
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== 'swarm-progress-msg');
+              return [
+                ...filtered,
+                { id: generateRandomId('assistant'), role: 'assistant' as const, content: data.final_report },
+              ];
+            });
+            executeMobileTool('mobile_show_notification', {
+              title: 'Swarm Task Completed, Sir',
+              body: 'The research query has been compiled successfully.',
+            }).catch(() => {});
+          }
+        } else if (data.type === 'swarm_error') {
+          if (data.session_id === sessionId) {
+            setActiveSwarmTask(null);
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== 'swarm-progress-msg');
+              return [
+                ...filtered,
+                { id: generateRandomId('assistant'), role: 'assistant' as const, content: `[Swarm Task Failed: ${data.error}]` },
+              ];
+            });
+          }
         } else if (data.type === 'done') {
           pendingDoneDataRef.current = data;
           isDoneReceivedRef.current = true;
@@ -561,6 +625,11 @@ export function useWebSocket(
   };
 
   const handleSendMessage = async (overrideText?: string) => {
+    const currentBridgeMode = await storage.getBridgeMode();
+    const currentMobileLocalIp = await storage.getMobileLocalIp();
+    setBridgeMode(currentBridgeMode);
+    setMobileLocalIp(currentMobileLocalIp);
+
     const textToUse = typeof overrideText === 'string' ? overrideText : undefined;
     const userQuery = textToUse !== undefined ? textToUse.trim() : inputText.trim();
     if (!userQuery && !stagedAttachment) return;
@@ -608,7 +677,11 @@ export function useWebSocket(
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ messages: updatedMessages }),
+          body: JSON.stringify({ 
+            messages: updatedMessages,
+            bridge_mode: currentBridgeMode,
+            mobile_local_ip: currentMobileLocalIp || undefined
+          }),
         });
         if (response.ok) {
           const resData = await response.json();
@@ -623,6 +696,160 @@ export function useWebSocket(
         setBtwMessages((prev) => [...prev, { role: 'assistant', content: `[Error: ${err.message}]` }]);
       } finally {
         setBtwLoading(false);
+      }
+      return;
+    }
+
+    if (userQuery.startsWith('/agents')) {
+      setInputText('');
+      setStagedAttachment(null);
+      
+      const cleanText = userQuery.replace(/^\/agents\s*/, '').trim();
+      if (!cleanText) {
+        showAlert('Invalid Query, Sir', 'Please describe the task for the agents.');
+        return;
+      }
+
+      setLoading(true);
+      setStreamingText('');
+
+      // Determine or create session id
+      let targetSessionId = sessionRef.current.currentSessionId;
+      if (!targetSessionId) {
+        if (!token || !backendUrl) {
+          setLoading(false);
+          return;
+        }
+        try {
+          const response = await fetch(`${backendUrl.trim().replace(/\/$/, '')}/sessions?name=New Chat`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (response.ok) {
+            const session = await response.json();
+            sessionRef.current.setSessions((prev) => [session, ...prev]);
+            targetSessionId = session.id;
+            sessionRef.current.setCurrentSessionId(session.id);
+            sessionRef.current.setIsNewChat(false);
+            connectWebSocket(session.id, token, backendUrl);
+          } else {
+            showAlert('Error', 'Failed to initialize session.');
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          showAlert('Error', 'Could not initialize session.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Add local messages for user prompt and placeholder for swarm progress card
+      setMessages((prev) => [
+        ...prev,
+        { id: generateRandomId('user'), role: 'user', content: userQuery },
+        { id: 'swarm-progress-msg', role: 'assistant', content: '', type: 'swarm_progress' as any }
+      ]);
+
+      if (token?.startsWith('mock-')) {
+        const mockTaskId = `swarm-mock-${Math.floor(Math.random() * 100000)}`;
+        const mockActiveSwarm = {
+          task_id: mockTaskId,
+          query: cleanText,
+          status: 'running',
+          subagents: [
+            { id: 'agent-1', name: 'Agent Researcher', role: 'Web Research', task: 'Search web for info', status: 'running', logs: 'Searching...' },
+            { id: 'agent-2', name: 'Agent Analyzer', role: 'Analyze Data', task: 'Analyze findings', status: 'pending', logs: 'Waiting...' },
+            { id: 'agent-3', name: 'Agent Verifier', role: 'Verify Facts', task: 'Verify details', status: 'pending', logs: 'Waiting...' }
+          ],
+          final_result: null
+        };
+        setActiveSwarmTask(mockActiveSwarm);
+        
+        // Simulate progress
+        setTimeout(() => {
+          setActiveSwarmTask((prev: any) => {
+            if (!prev) return null;
+            const updated = JSON.parse(JSON.stringify(prev));
+            updated.subagents[0].status = 'completed';
+            updated.subagents[0].logs = 'Task complete.';
+            updated.subagents[1].status = 'running';
+            updated.subagents[1].logs = 'Structuring comparisons...';
+            return updated;
+          });
+        }, 1500);
+
+        setTimeout(() => {
+          setActiveSwarmTask((prev: any) => {
+            if (!prev) return null;
+            const updated = JSON.parse(JSON.stringify(prev));
+            updated.subagents[1].status = 'completed';
+            updated.subagents[1].logs = 'Task complete.';
+            updated.subagents[2].status = 'running';
+            updated.subagents[2].logs = 'Verifying sources...';
+            return updated;
+          });
+        }, 3000);
+
+        setTimeout(() => {
+          setActiveSwarmTask((prev: any) => {
+            if (!prev) return null;
+            const updated = JSON.parse(JSON.stringify(prev));
+            updated.subagents[2].status = 'completed';
+            updated.subagents[2].logs = 'Task complete.';
+            updated.status = 'completed';
+            return updated;
+          });
+          
+          setMessages((prev) => {
+            const filtered = prev.filter((m) => m.id !== 'swarm-progress-msg');
+            return [
+              ...filtered,
+              {
+                id: generateRandomId('assistant'),
+                role: 'assistant',
+                content: 'Sir, I have gathered and analyzed the research. Here is the final compiled summary with links and charts.'
+              }
+            ];
+          });
+          setActiveSwarmTask(null);
+          setLoading(false);
+        }, 4500);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${backendUrl.trim().replace(/\/$/, '')}/chat/swarm/launch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            query: userQuery,
+            session_id: targetSessionId,
+            model_key: activeModel,
+            bridge_mode: currentBridgeMode,
+            mobile_local_ip: currentMobileLocalIp || undefined,
+          }),
+        });
+
+        if (response.ok) {
+          const resData = await response.json();
+          if (resData.active_swarm) {
+            setActiveSwarmTask(resData.active_swarm);
+          }
+        } else {
+          const errText = await response.text();
+          showAlert('Swarm Launch Error, Sir', errText || 'Failed to launch swarm task.');
+          setMessages((prev) => prev.filter((m) => m.id !== 'swarm-progress-msg'));
+        }
+      } catch (err: any) {
+        showAlert('Swarm Launch Error, Sir', err.message || String(err));
+        setMessages((prev) => prev.filter((m) => m.id !== 'swarm-progress-msg'));
+      } finally {
+        setLoading(false);
       }
       return;
     }
@@ -850,6 +1077,8 @@ export function useWebSocket(
           : null,
         document_id: uploadedDocId || undefined,
         image: undefined,
+        bridge_mode: currentBridgeMode,
+        mobile_local_ip: currentMobileLocalIp || undefined,
       });
     };
 
@@ -974,6 +1203,32 @@ export function useWebSocket(
     }
   };
 
+  const cancelSwarmTask = async (taskId: string) => {
+    try {
+      if (token?.startsWith('mock-')) {
+        setActiveSwarmTask(null);
+        setLoading(false);
+        setMessages((prev) => prev.filter((m) => m.id !== 'swarm-progress-msg'));
+        return;
+      }
+
+      const response = await fetch(`${backendUrl.trim().replace(/\/$/, '')}/chat/swarm/${taskId}/cancel`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (response.ok) {
+        setActiveSwarmTask(null);
+        setMessages((prev) => prev.filter((m) => m.id !== 'swarm-progress-msg'));
+      } else {
+        console.error('Failed to cancel swarm task, Sir.');
+      }
+    } catch (err) {
+      console.error('Error canceling swarm task, Sir:', err);
+    }
+  };
+
   return {
     messages,
     setMessages,
@@ -1003,6 +1258,9 @@ export function useWebSocket(
     setBtwLoading,
     messageProjectIds,
     setMessageProjectIds,
+    activeSwarmTask,
+    setActiveSwarmTask,
+    cancelSwarmTask,
     wsRef,
     connectWebSocket,
     handleSendMessage,

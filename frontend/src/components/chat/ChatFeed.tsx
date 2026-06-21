@@ -6,6 +6,7 @@ import { LogoV } from './LogoV';
 import { styles } from './styles';
 import { selectBestVoice, cleanTextForSpeech } from '@/utils/mobileTools';
 import { ToolWorkflowPath, WorkflowNode } from './ToolWorkflowPath';
+import { SwarmTaskCard } from './SwarmTaskCard';
 
 let Speech: any = null;
 try {
@@ -19,6 +20,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'laptop';
   content: string;
   timestamp?: number;
+  type?: 'swarm_progress';
 }
 
 interface ChatFeedProps {
@@ -38,6 +40,7 @@ interface ChatFeedProps {
   confirmationToolLabel?: string | null;
   onSendConfirmationResponse?: (confirm: boolean, alwaysAllow: boolean) => void;
   onOpenSourcesDrawer?: (sources: { title: string; url: string; domain: string }[]) => void;
+  activeSwarmTask?: any | null;
 }
 
 const hasCodeBlocks = (text: string) => {
@@ -90,6 +93,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   confirmationToolLabel,
   onSendConfirmationResponse,
   onOpenSourcesDrawer,
+  activeSwarmTask,
 }) => {
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [speakingId, setSpeakingId] = React.useState<string | null>(null);
@@ -175,6 +179,10 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
         onScroll={handleScroll}
         scrollEventThrottle={16}
         renderItem={({ item, index }) => {
+          if (item.type === 'swarm_progress') {
+            if (!activeSwarmTask) return null;
+            return <SwarmTaskCard task={activeSwarmTask} />;
+          }
           if (item.role === 'user') {
             return (
               <View style={styles.userBubbleWrapper}>

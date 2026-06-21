@@ -1,56 +1,101 @@
 
----
+## 11. MULTI-AGENT SWARM (/agents) ARCHITECTURE (NEW PROPOSAL)
 
-## 10. VISUAL IMMERSION & COMPONENT ENHANCEMENTS (NEW DISCUSSION)
+This proposal details the design of the `/agents` command action, which launches a background, non-blocking swarm of specialized agents to execute complex queries. The system provides live visual progress tracking via an interactive SVG pathing indicator, uses the client's local IP address to avoid Hugging Face rate limits, supports background execution on lock screens, and aggregates the final output under the 60/40 UI composition rule.
 
-This section maps out the proposed architecture for rendering Matplotlib charts, fetching authentic images for free, and maintaining a strict 60/40 component-to-text ratio to deliver a visual-first chat interface.
+### A. Swarm Architecture & Roles (Main Agent vs. Subagents)
+Rather than executing queries through a single model invocation, the `/agents` command partitions the task across a dynamic, coordinated swarm of $N$ agents (where $N \ge 3$, decided by task complexity or explicitly defined by the user as `/agents use X agents to do Y`).
 
-### A. Matplotlib Rendering Failure: Root Cause & Solution
-* **The Problem:** The `run_matplotlib_script` tool executes perfectly and returns a base64 markdown image: `![title](data:image/png;base64,...)`. However, `MarkdownRenderer.tsx` lacks parsing for `![alt](url)` markdown images. As a result, the base64 string is rendered as plain text or ignored entirely.
-* **The Solution:** Update `renderTextWithInlineFormatting()` and `renderInlineSpans()` in the frontend parser to match the markdown image syntax:
-  ```typescript
-  const imageRegex = /!\[(.*?)\]\((.*?)\)/g;
-  ```
-  When matched, map it to a custom `MarkdownImage` component styled to display base64 data URIs and external links natively with a dark-background container card.
+```
+                     ┌──────────────────┐
+                     │    User Query    │
+                     └────────┬─────────┘
+                              │
+                     ┌────────▼─────────┐
+                     │   Main Agent     │ (Coordinator & Compiler)
+                     └─┬──────┬──────┬──┘
+                       │      │      │
+       ┌───────────────┘      │      └────────────────┐
+       │                      │                       │
+┌──────▼──────┐        ┌──────▼──────┐         ┌──────▼──────┐
+│ Subagent 1  │        │ Subagent 2  │         │ Subagent 3  │ ... (Subagents)
+│ Researcher  │        │  Analyzer   │         │  Verifier   │
+└──────┬──────┘        └──────┬──────┘         └──────┬──────┘
+       │                      │                       │
+       └───────────────┐      │      ┌────────────────┘
+                       │      │      │
+                     ┌─▼──────▼──────▼──┐
+                     │   Main Agent     │ (Review, Refine & Compile final output)
+                     └──────────────────┘
+```
 
-### B. Free & Authentic Image Fetching Strategies (Zero Cost API)
-To fetch authentic images for entities (e.g. fish species, historical figures, cities) instead of generic placeholders:
-1. **DuckDuckGo Image Scraper (Dynamic Backend Fetching)**:
-   - Create a backend utility tool (e.g., `fetch_image_urls(query: str, count: int = 5) -> List[str]`).
-   - Query DuckDuckGo's vqd/JSON endpoint (e.g., `https://duckduckgo.com/d.js` or scraper endpoints) to dynamically parse clean, unauthenticated image URLs directly from the web during tools execution.
-2. **Wikipedia & Wikimedia Commons API (Unauthenticated & Free)**:
-   - Wikipedia's media API is free, fast, and does not require an API key.
-   - For a query like *"Gobiocichla wonderi"*, query `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages|pageterms&titles=...&format=json&piprop=original` to retrieve the original high-resolution photo from Wikimedia.
-3. **Integration in Agent Loop**:
-   - The backend Agent can automatically chain a `fetch_images` step when compiling lists of visual subjects, passing the URLs directly into a `<Carousel images="url1,url2..." />` custom component.
+1. **The Main Agent (Coordinator / Reviewer)**:
+   - Evaluates the user query complexity and decides the optimal number of subagents ($N \ge 3$) and their specific specializations.
+   - Splits the primary query into $N$ distinct tasks with clear inputs and dependencies.
+   - Orchestrates execution, receives subagent outputs, and performs a strict quality review.
+   - If a subagent's output is incomplete or contains errors, the Main Agent automatically triggers a **refinement loop** (up to 3 times) to re-run or correct the subagent.
+   - Compiles the final compiled payload adhering to the **60/40 visual component layout rule**.
+   
+2. **Subagents (Specialized Execution)**:
+   - **Researcher Agent**: Specialized in deep web searching (DuckDuckGo, Wikipedia) or RAG lookup.
+   - **Analyzer Agent**: Specialized in compiling, sorting, structuring data, and preparing charts.
+   - **Verifier Agent**: Specialized in cross-referencing information, finding discrepancies, and verifying sources.
+   - **Custom Agent**: Specialized dynamically based on task requirements (e.g., Code Analyzer, Itinerary Planner).
+   - *Note:* All agents use the user's currently selected model to maintain consistency.
 
-### C. The 60% Components / 40% Text Ratio Enforcement
-To stop VoxKage from relying on generic text walls, we will update the system prompt in `backend/system_prompt.py`:
-* **The 60/40 Composition Rule**: Enforce that at least 60% of the screen space (components ratio) must consist of visual UI widgets:
-  - `<Carousel images="..." />` for galleries or lists of subjects.
-  - `<Chart type="bar|line" data="..." labels="..." />` for statistics/comparisons.
-  - `<TaskList items="..." />` for progressive operations.
-  - Collapsible `<Table>` layouts for data properties.
-* **Conciseness Directive**: Plain text paragraphs are restricted to brief summaries and transitions, representing at most 40% of the response.
+### B. Background Execution & Local IP Bridge
+To avoid rate limits on Hugging Face (HF) Spaces shared IPs and support lock-screen execution:
+1. **The Local IP Bridge**:
+   - The HF Space backend acts strictly as the orchestrator. It does not run the intensive web requests itself.
+   - Instead, the backend pushes execution tasks to the local client (`laptop_bridge.py` or the mobile app running locally on the user's device) via the WebSocket connection.
+   - The local client executes the MCP tool commands (e.g. `web_search`, `fetch_images`) using the user's home IP address, bypassing HF Space IP rate limits.
+   - The local client streams status updates (e.g. "Agent 1: Searching for video editor prices...") back to the backend to keep the database and state synchronized.
+2. **Lock Screen / Background Service**:
+   - The mobile application leverages Expo's `TaskManager` and `BackgroundFetch` to maintain active socket connections and process swarm queue updates.
+   - If the phone goes to sleep or is locked, the local task executor continues processing.
+   - Upon completion, the backend triggers a high-priority system push notification using the `voxkage-notify` plugin, directing the user back to the originating chat session on click.
 
-### D. Immersive UI Enhancements: Lightbox & Zoom Transitions
-1. **Interactive Image Modal (Lightbox)**:
-   - Wrap all images (standalone markdown images and carousel slides) in a `TouchableOpacity`.
-   - Clicking an image opens a full-screen React Native `Modal` displaying a dark overlay.
-   - Use React Native's `Animated` library to scale the image up smoothly.
-2. **Meta Details & Source Linking**:
-   - Underneath the zoomed image, display the title, description, and an editorial "Source Link" button.
-   - Example:
-     ```
-     ┌──────────────────────────────────────────────────┐
-     │                      [Image]                     │
-     │                                                  │
-     │  "Gobiocichla wonderi (Wonder's cichlid)"        │
-     │  Discovered in the Niger River basin.            │
-     │                                                  │
-     │  [ Visit Wikipedia Source ]                      │
-     └──────────────────────────────────────────────────┘
-     ```
-3. **Smooth Swipe Carousel**:
-   - Improve the existing `CarouselComponent` with smoother scroll gesture response, snapping physics, and clear dot page indicators.
+### C. Live SVG Pathing & Sticky UI Transitions
+To keep the user informed without cluttering the chat history, the progress card transitions smoothly based on scroll position:
+
+1. **Inline Swarm Card**:
+   - Renders at the trigger point in the feed. Shows the user's query, agent specialization cards, and a vertical/interconnected SVG tree diagram with paths between agents.
+2. **Smooth Sticky Header Transition**:
+   - As the user scrolls down, the inline card exits the viewport. An `onScroll` listener in the chat container triggers a transition that slides a minimal, horizontal SVG pathing indicator down from the chat header (just below the session name).
+   - The indicator consists of small, glowing nodes connected by lines. Completed agents turn **Green**, active agents pulse **Blue**, pending agents are **Grey**, and failures turn **Red**.
+3. **Interactive Popup Modal**:
+   - Clicking the sticky SVG header indicator opens a premium, glassmorphic dropdown modal displaying:
+     - The original query.
+     - A summary of total agents and overall progress percentage.
+     - A list of agents where clicking an agent expands their active logs (e.g., *"Agent 2 (Analyzer) is compiling price lists"*).
+     - A prominent **Cancel Workflow** button to immediately stop and terminate the background execution.
+
+```
++-------------------------------------------------+
+|               Chat Session Name                 |
+|  [O]----[O]----[●]----[O]   (Sticky SVG Path)   | <-- Stays below header
++-------------------------------------------------+
+|                                                 |
+|  Chat continues here...                         |
+|  User: What is the weather today?               |
+|  VoxKage: It is sunny...                        |
+|                                                 |
++-------------------------------------------------+
+```
+
+### D. Completion & Injection Flow
+- Once the Main Agent approves the compiled results, the background job signals the frontend.
+- If the user is currently looking at the same chat session:
+  - The sticky SVG header smoothly fades out.
+  - VoxKage automatically posts a concluding message in the chat feed beginning with: *"Sir, the background research task is finished. Here is the final compiled report."*
+  - The response is rendered with 60% visual components (Charts, Tables, Weather, Maps) and 40% text, keeping the interface clean and interactive.
+- If the user is in a different chat or the app is closed:
+  - A push notification is sent: *"Sir, the research on [Topic] is complete."*
+  - Clicking the notification takes the user directly to the originating chat session, where the completed response is immediately shown.
+
+### E. Edge Cases & Safety Handlers
+- **Agent Failure / Refinement Timeout**: If a subagent repeatedly fails or hangs (e.g., due to connection drop), the Verifier/Main agent attempts to self-correct by re-assigning the subtask to another subagent or using cached fallback data, failing gracefully after 3 attempts without hanging the loop.
+- **WebSocket Reconnection**: If the mobile device loses internet and reconnects, the background worker fetches the current swarm state from the database via `/projects/swarm/status` to resume UI synchronization.
+- **Explicit Cancellation**: Pressing the cancel button sends a `DELETE /projects/swarm/cancel` call, stopping all backend loops, freeing up resources, and rendering a cancelled status badge on the card.
+
 

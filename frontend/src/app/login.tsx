@@ -61,6 +61,8 @@ export default function LoginScreen() {
   const [isOtpSent, setIsOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [bridgeMode, setBridgeMode] = useState<'laptop' | 'mobile_local'>('laptop');
+  const [mobileLocalIp, setMobileLocalIp] = useState('');
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -76,6 +78,11 @@ export default function LoginScreen() {
       const storedEmail = await storage.getEmail();
       setBackendUrl(url);
       if (storedEmail) setEmail(storedEmail);
+      
+      const storedBridgeMode = await storage.getBridgeMode();
+      const storedMobileLocalIp = await storage.getMobileLocalIp();
+      setBridgeMode(storedBridgeMode);
+      setMobileLocalIp(storedMobileLocalIp);
 
       const token = await storage.getToken();
       if (token) {
@@ -464,6 +471,69 @@ export default function LoginScreen() {
                   />
                 </View>
 
+                <Text style={styles.advancedLabel}>Connection Bridge Mode</Text>
+                <View style={styles.bridgeSelectorRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.bridgeSelectorBtn,
+                      bridgeMode === 'laptop' && styles.bridgeSelectorBtnActive,
+                    ]}
+                    onPress={async () => {
+                      setBridgeMode('laptop');
+                      await storage.setBridgeMode('laptop');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.bridgeSelectorText,
+                        bridgeMode === 'laptop' && styles.bridgeSelectorTextActive,
+                      ]}
+                    >
+                      Laptop Daemon
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.bridgeSelectorBtn,
+                      bridgeMode === 'mobile_local' && styles.bridgeSelectorBtnActive,
+                    ]}
+                    onPress={async () => {
+                      setBridgeMode('mobile_local');
+                      await storage.setBridgeMode('mobile_local');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.bridgeSelectorText,
+                        bridgeMode === 'mobile_local' && styles.bridgeSelectorTextActive,
+                      ]}
+                    >
+                      Mobile Local Bridge
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {bridgeMode === 'mobile_local' && (
+                  <>
+                    <Text style={styles.advancedLabel}>Mobile Local Bridge IP / Port</Text>
+                    <View style={styles.inputWrapper}>
+                      <Ionicons name="wifi-outline" size={16} color="#475569" style={styles.inputIcon} />
+                      <TextInput
+                        style={styles.input}
+                        placeholder="e.g. 192.168.1.100:9000"
+                        placeholderTextColor="#475569"
+                        value={mobileLocalIp}
+                        onChangeText={async (val) => {
+                          setMobileLocalIp(val);
+                          await storage.setMobileLocalIp(val);
+                        }}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                    </View>
+                  </>
+                )}
+
                 <Text style={styles.advancedLabel}>Developer Passcode (Master Key)</Text>
                 <View style={styles.inputWrapper}>
                   <Ionicons name="key-outline" size={16} color="#475569" style={styles.inputIcon} />
@@ -696,6 +766,32 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginBottom: 6,
     textTransform: 'uppercase',
+  },
+  bridgeSelectorRow: {
+    flexDirection: 'row',
+    backgroundColor: '#0d0d0d',
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#262626',
+  },
+  bridgeSelectorBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  bridgeSelectorBtnActive: {
+    backgroundColor: '#171717',
+  },
+  bridgeSelectorText: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  bridgeSelectorTextActive: {
+    color: '#f3f4f6',
   },
   footerText: {
     textAlign: 'center',

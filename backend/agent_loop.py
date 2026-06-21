@@ -1,13 +1,62 @@
 import os
 import json
 import asyncio
+import re
+import uuid
 from typing import AsyncGenerator
 from database import log_message
 from opencode_client import OPENCODE_BASE_URL, get_opencode_model, sanitize_history_roles
 from opencode_proxy import query_opencode_proxy
 import requests
 import httpx
-from datetime import datetime
+
+def parse_dsml_tool_calls(text: str) -> tuple[str, list[dict]]:
+    if not text:
+        return "", []
+    tool_calls = []
+    
+    # 1. Find all invoke blocks
+    invoke_pattern = re.compile(
+        r'<[｜|?]{2}DSML[｜|?]{2}invoke name="([^"]+)"\s*>(.*?)</[｜|?]{2}DSML[｜|?]{2}invoke>',
+        re.DOTALL
+    )
+    
+    def replace_invoke(match):
+        tool_name = match.group(1)
+        params_content = match.group(2)
+        
+        # Parse parameters
+        param_pattern = re.compile(
+            r'<[｜|?]{2}DSML[｜|?]{2}parameter name="([^"]+)"[^>]*>(.*?)</[｜|?]{2}DSML[｜|?]{2}parameter>',
+            re.DOTALL
+        )
+        args = {}
+        for param_match in param_pattern.finditer(params_content):
+            param_name = param_match.group(1)
+            param_val = param_match.group(2).strip()
+            
+            try:
+                parsed_val = json.loads(param_val)
+            except ValueError:
+                parsed_val = param_val
+            args[param_name] = parsed_val
+            
+        tool_calls.append({
+            "id": f"call_{uuid.uuid4().hex[:12]}",
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "arguments": json.dumps(args)
+            }
+        })
+        return ""
+        
+    cleaned_text = invoke_pattern.sub(replace_invoke, text)
+    
+    # 2. Remove tool_calls tags if present
+    cleaned_text = re.sub(r'</?[｜|?]{2}DSML[｜|?]{2}tool_calls\s*>', '', cleaned_text)
+    
+    return cleaned_text.strip(), tool_calls
 
 # Import backend engines
 from websearch_engine import web_search, web_fetch, web_search_deep, web_search_parallel, web_fetch_parallel
@@ -134,7 +183,9 @@ async def run_agentic_loop(
     client_websocket = None,
     variant: str = "High",
     document_id: str = None,
-    image_base64: str = None
+    image_base64: str = None,
+    bridge_mode: str = "laptop",
+    mobile_local_ip: str = None
 ) -> AsyncGenerator[str, None]:
     if active_project_box is None:
         active_project_box = [None]
@@ -164,7 +215,9 @@ async def run_agentic_loop(
             client_websocket=client_websocket,
             variant=variant,
             document_id=document_id,
-            image_base64=image_base64
+            image_base64=image_base64,
+            bridge_mode=bridge_mode,
+            mobile_local_ip=mobile_local_ip
         ):
             yield chunk
     finally:
@@ -212,6 +265,887 @@ async def run_agentic_loop(
                 cleanup_local_workspace(final_project_id)
 
 
+
+async def execute_tool_call_v2(
+    tc: dict,
+    user_id: str,
+    session_id: str,
+    active_project_box: list,
+    client_websocket,
+    manager_ref,
+    client_time: str,
+    model_key: str,
+    tool_context: dict,
+    bridge_mode: str = "laptop",
+    mobile_local_ip: str = None
+) -> tuple:
+    try:
+        name = tc["function"]["name"]
+        args_str = tc["function"]["arguments"]
+        try:
+            args = json.loads(args_str or "{}")
+        except:
+            args = {}
+
+        # Set up a helper for sending text packets to the client/all active chats
+        async def send_to_client(payload_dict):
+            if client_websocket:
+                try:
+                    await client_websocket.send_text(json.dumps(payload_dict))
+                except:
+                    pass
+            elif manager_ref and user_id in manager_ref.active_chats:
+                for ws in manager_ref.active_chats[user_id]:
+                    try:
+                        await ws.send_text(json.dumps(payload_dict))
+                    except:
+                        pass
+
+        # Check and find the best target mobile WebSocket connection
+        mobile_ws = None
+        if client_websocket:
+            mobile_ws = client_websocket
+        elif manager_ref and user_id in manager_ref.active_chats:
+            chat_wss = manager_ref.active_chats[user_id]
+            if chat_wss:
+                mobile_ws = chat_wss[0]
+
+        if name in {"web_search", "web_fetch", "web_search_parallel", "web_fetch_parallel", "web_search_deep", "browse_and_extract_tool"}:
+            tool_context["web_search_called"] = True
+            import urllib.parse
+            if name == "web_search" or name == "web_search_deep":
+                q = args.get("query", "")
+                if q:
+                    tool_context["consulted_sources"].append({
+                        "title": f"DuckDuckGo Search: {q}",
+                        "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
+                    })
+            elif name == "web_fetch":
+                u = args.get("url", "")
+                if u:
+                    tool_context["consulted_sources"].append({"title": u, "url": u})
+            elif name == "web_search_parallel":
+                for q in args.get("queries", []):
+                    if q:
+                        tool_context["consulted_sources"].append({
+                            "title": f"DuckDuckGo Search: {q}",
+                            "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
+                        })
+            elif name == "web_fetch_parallel":
+                for u in args.get("urls", []):
+                    if u:
+                        tool_context["consulted_sources"].append({"title": u, "url": u})
+            elif name == "browse_and_extract_tool":
+                u = args.get("url", "")
+                q = args.get("query", "")
+                if u:
+                    tool_context["consulted_sources"].append({"title": u, "url": u})
+                elif q:
+                    tool_context["consulted_sources"].append({
+                        "title": f"DuckDuckGo Search: {q}",
+                        "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
+                    })
+
+        tc_id = tc["id"]
+        tool_label = get_tool_label(name, args)
+
+        # Interactive confirmation with Always Allow support
+        CONFIRMATION_REQUIRED_TOOLS = {"mobile_send_sms", "mobile_create_calendar_event", "mobile_create_contact"}
+        if name in CONFIRMATION_REQUIRED_TOOLS:
+            from memory_engine import check_trusted, set_trusted_action
+            trust_status = check_trusted(user_id, name)
+            if "trusted" not in trust_status:
+                import uuid
+                confirm_req_id = str(uuid.uuid4())
+                loop = asyncio.get_running_loop()
+                confirm_future = loop.create_future()
+                CONFIRMATION_CHANNELS[confirm_req_id] = confirm_future
+            
+                label_map = {
+                    "mobile_send_sms": "Send SMS",
+                    "mobile_create_calendar_event": "Create Calendar Event",
+                    "mobile_create_contact": "Create Contact"
+                }
+                if mobile_ws:
+                    await mobile_ws.send_text(json.dumps({
+                        "type": "tool_confirm_request",
+                        "request_id": confirm_req_id,
+                        "tool_name": name,
+                        "label": label_map.get(name, name)
+                    }))
+                    await mobile_ws.send_text(json.dumps({
+                        "type": "agent_thought",
+                        "content": f"Waiting for user confirmation to execute: {name}..."
+                    }))
+                    try:
+                        confirm_payload = await asyncio.wait_for(confirm_future, timeout=120.0)
+                        confirm_choice = confirm_payload.get("confirm", False)
+                        always_allow = confirm_payload.get("always_allow", False)
+                    
+                        if not confirm_choice:
+                            if confirm_req_id in CONFIRMATION_CHANNELS:
+                                del CONFIRMATION_CHANNELS[confirm_req_id]
+                            raise Exception("Action rejected by user, Sir.")
+                    
+                        if always_allow:
+                            set_trusted_action(user_id, name, True, "User clicked Always Allow in chat screen")
+                            await mobile_ws.send_text(json.dumps({
+                                "type": "agent_thought",
+                                "content": f"Tool '{name}' marked as always allowed."
+                            }))
+                    except asyncio.TimeoutError:
+                        if confirm_req_id in CONFIRMATION_CHANNELS:
+                            del CONFIRMATION_CHANNELS[confirm_req_id]
+                        raise Exception("Action confirmation timed out (120s limit).")
+                    finally:
+                        if confirm_req_id in CONFIRMATION_CHANNELS:
+                            del CONFIRMATION_CHANNELS[confirm_req_id]
+                else:
+                    raise Exception("No active connection to prompt confirmation, Sir.")
+
+        # Execute Tool
+        tool_output = ""
+    
+        # --- Route Search and Fetch Tools ---
+        if name in {"web_search", "web_fetch", "web_search_parallel", "web_fetch_parallel", "web_search_deep", "fetch_images_for_query"}:
+            announcement = ""
+            if name == "web_search":
+                announcement = f"Searching the web for: '{args.get('query', '')}'..."
+            elif name == "web_fetch":
+                announcement = f"Fetching content from URL: {args.get('url', '')}..."
+            elif name == "web_search_parallel":
+                announcement = f"Performing parallel web searches..."
+            elif name == "web_fetch_parallel":
+                announcement = f"Fetching multiple web pages in parallel..."
+            elif name == "web_search_deep":
+                announcement = f"Performing deep search and fetching web contents for: '{args.get('query', '')}'..."
+            elif name == "fetch_images_for_query":
+                announcement = f"Searching for authentic source images: {args.get('query', '')}..."
+
+            if announcement:
+                await send_to_client({"type": "hud_log", "content": announcement})
+
+            executed_on_laptop = False
+            executed_on_mobile = False
+
+            if bridge_mode == "laptop":
+                # Sequential fallback: 1) local laptop bridge daemon (if active), 2) proxy through active mobile client's WebSocket channel, 3) fallback to server execution
+                laptop_ws = manager_ref.active_laptops.get(user_id) if manager_ref else None
+                if laptop_ws:
+                    try:
+                        import uuid
+                        req_id = f"tool_{uuid.uuid4()}"
+                        loop = asyncio.get_running_loop()
+                        future = loop.create_future()
+                        LAPTOP_CHANNELS[req_id] = future
+                        
+                        await laptop_ws.send_text(json.dumps({
+                            "action": "execute_tool",
+                            "tool_name": name,
+                            "args": args,
+                            "request_id": req_id
+                        }))
+                        
+                        result_payload = await asyncio.wait_for(future, timeout=90.0)
+                        if "error" in result_payload:
+                            raise Exception(result_payload["error"])
+                        tool_output = result_payload.get("output", "")
+                        executed_on_laptop = True
+                    except Exception as le:
+                        print(f"Laptop execution of {name} failed: {le}. Trying mobile fallback.")
+                        executed_on_laptop = False
+
+                if not executed_on_laptop and mobile_ws:
+                    try:
+                        import uuid
+                        req_id = str(uuid.uuid4())
+                        loop = asyncio.get_running_loop()
+                        future = loop.create_future()
+                        MOBILE_CHANNELS[req_id] = future
+                        
+                        await mobile_ws.send_text(json.dumps({
+                            "type": "mobile_tool_call",
+                            "request_id": req_id,
+                            "tool_name": name,
+                            "arguments": args
+                        }))
+                        
+                        result_payload = await asyncio.wait_for(future, timeout=90.0)
+                        status_res = result_payload.get("status")
+                        result_val = result_payload.get("result")
+                        if status_res == "success":
+                            tool_output = json.dumps(result_val) if not isinstance(result_val, str) else result_val
+                            executed_on_mobile = True
+                        else:
+                            print(f"Mobile tool call returned error status: {result_val}")
+                    except Exception as me:
+                        print(f"Mobile execution of {name} failed: {me}. Trying server execution fallback.")
+                        executed_on_mobile = False
+
+            elif bridge_mode == "mobile_local":
+                # Sequential fallback: 1) proxy through active mobile client's WebSocket channel, 2) fallback to server execution
+                if mobile_ws:
+                    try:
+                        import uuid
+                        req_id = str(uuid.uuid4())
+                        loop = asyncio.get_running_loop()
+                        future = loop.create_future()
+                        MOBILE_CHANNELS[req_id] = future
+                        
+                        await mobile_ws.send_text(json.dumps({
+                            "type": "mobile_tool_call",
+                            "request_id": req_id,
+                            "tool_name": name,
+                            "arguments": args
+                        }))
+                        
+                        result_payload = await asyncio.wait_for(future, timeout=90.0)
+                        status_res = result_payload.get("status")
+                        result_val = result_payload.get("result")
+                        if status_res == "success":
+                            tool_output = json.dumps(result_val) if not isinstance(result_val, str) else result_val
+                            executed_on_mobile = True
+                        else:
+                            print(f"Mobile tool call returned error status: {result_val}")
+                    except Exception as me:
+                        print(f"Mobile execution of {name} failed: {me}. Trying server execution fallback.")
+                        executed_on_mobile = False
+
+            if not executed_on_laptop and not executed_on_mobile:
+                # Fallback to server execution
+                if name == "web_search":
+                    q = args.get("query", "")
+                    search_res = await web_search(q)
+                    tool_output = json.dumps(search_res)
+                    if isinstance(search_res, list):
+                        for r in search_res:
+                            if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                tool_context["consulted_sources"].append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
+                elif name == "web_fetch":
+                    u = args.get("url", "")
+                    fetch_res = await web_fetch(u)
+                    tool_output = json.dumps(fetch_res)
+                    if isinstance(fetch_res, dict) and fetch_res.get("url") and "error" not in fetch_res:
+                        tool_context["consulted_sources"].append({"title": fetch_res.get("url"), "url": fetch_res.get("url")})
+                elif name == "web_search_parallel":
+                    queries = args.get("queries", [])
+                    search_res = await web_search_parallel(queries)
+                    tool_output = json.dumps(search_res)
+                    if isinstance(search_res, list):
+                        for sub_list in search_res:
+                            if isinstance(sub_list, list):
+                                for r in sub_list:
+                                    if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                        tool_context["consulted_sources"].append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
+                elif name == "web_fetch_parallel":
+                    urls = args.get("urls", [])
+                    fetch_res = await web_fetch_parallel(urls)
+                    tool_output = json.dumps(fetch_res)
+                    if isinstance(fetch_res, list):
+                        for r in fetch_res:
+                            if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                tool_context["consulted_sources"].append({"title": r.get("url"), "url": r.get("url")})
+                elif name == "web_search_deep":
+                    q = args.get("query", "")
+                    deep_res = await web_search_deep(q)
+                    tool_output = json.dumps(deep_res)
+                    if isinstance(deep_res, list):
+                        for r in deep_res:
+                            if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                tool_context["consulted_sources"].append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
+                elif name == "fetch_images_for_query":
+                    q = args.get("query", "")
+                    lim = args.get("limit", 5)
+                    tool_output = fetch_images_for_query(q, lim)
+
+        # --- All Other Tools ---
+        else:
+            announcement = ""
+            if name == "browse_and_extract_tool":
+                target = args.get("url") or args.get("query") or ""
+                announcement = f"Browsing and extracting text content for: '{target}'..."
+            elif name == "query_rag":
+                announcement = f"Searching Supabase pgvector RAG memory database..."
+            elif name == "list_indexed_documents":
+                announcement = f"Listing all permanently indexed documents in RAG..."
+            elif name == "delete_indexed_document":
+                target_name = args.get("filename") or args.get("document_id") or ""
+                announcement = f"Deleting document: '{target_name}' from RAG..."
+            elif name == "remember_user":
+                announcement = f"Updating your profile memories with new facts..."
+            elif name == "recall_user":
+                announcement = f"Accessing profile memory to recall facts..."
+            elif name == "forget_user":
+                announcement = f"Removing fact from profile memory..."
+            elif name == "log_problem":
+                announcement = f"Logging system problem..."
+            elif name == "log_solution":
+                announcement = f"Logging solution for problem ID: {args.get('problem_id', '')}..."
+            elif name == "search_memory":
+                announcement = f"Searching system problem/solution memories..."
+            elif name == "save_frontend_snippet":
+                announcement = f"Saving frontend code snippet: '{args.get('title', '')}'..."
+            elif name == "search_frontend_snippets":
+                announcement = f"Searching saved frontend snippets..."
+            elif name == "create_file":
+                announcement = f"Creating file: {args.get('filename', '')}..."
+            elif name == "convert_file":
+                announcement = f"Converting file format for: {args.get('file_path', '')}..."
+            elif name == "laptop_command":
+                cmd = args.get("command", "")
+                announcement = f"Executing laptop shell command: `{cmd}`..."
+            elif name == "open_application":
+                announcement = f"Opening application: {args.get('app_name', '')}..."
+            elif name == "close_application":
+                announcement = f"Closing application: {args.get('app_name', '')}..."
+            elif name == "media_control":
+                announcement = f"Controlling media playback: {args.get('action', '')}..."
+            elif name == "play_user_playlist":
+                announcement = f"Playing Spotify playlist: {args.get('playlist_name', '')}..."
+            elif name == "play_spotify_selection":
+                announcement = f"Playing Spotify track number: {args.get('number', '')}..."
+            elif name == "search_spotify":
+                announcement = f"Searching Spotify for: '{args.get('query', '')}'..."
+            elif name == "send_email":
+                announcement = f"Sending email via Gmail..."
+            elif name == "check_email":
+                announcement = f"Checking Gmail inbox for new messages..."
+            elif name == "read_email":
+                announcement = f"Opening and reading email ID: {args.get('email_id', '')}..."
+            elif name == "save_draft":
+                announcement = f"Saving email draft..."
+            elif name == "reply_to_email":
+                announcement = f"Replying to email ID: {args.get('email_id', '')}..."
+            elif name == "delete_email":
+                announcement = f"Deleting email ID: {args.get('email_id', '')}..."
+            elif name == "delete_emails_bulk":
+                announcement = f"Deleting emails in bulk..."
+            elif name == "mark_email_read":
+                announcement = f"Marking email ID: {args.get('email_id', '')} as read..."
+            elif name == "mark_email_unread":
+                announcement = f"Marking email ID: {args.get('email_id', '')} as unread..."
+            elif name == "archive_email":
+                announcement = f"Archiving email ID: {args.get('email_id', '')}..."
+            elif name == "get_email_stats":
+                announcement = f"Fetching email inbox statistics..."
+            elif name == "github_get_profile":
+                announcement = f"Retrieving GitHub profile..."
+            elif name == "github_list_my_repos":
+                announcement = f"Fetching your list of GitHub repositories..."
+            elif name == "github_create_repo":
+                announcement = f"Creating new GitHub repository..."
+            elif name == "github_actions_list":
+                announcement = f"Listing GitHub Action runs..."
+            elif name == "github_actions_get":
+                announcement = f"Fetching details for GitHub Action run ID: {args.get('run_id', '')}..."
+            elif name == "github_get_job_logs":
+                announcement = f"Retrieving logs for GitHub Job ID: {args.get('job_id', '')}..."
+            elif name == "get_current_datetime":
+                announcement = f"Checking system clock..."
+            elif name == "workspace_list_files":
+                announcement = f"Listing active workspace files..."
+            elif name == "workspace_read_file":
+                announcement = f"Reading workspace file: {args.get('file_path', '')}..."
+            elif name == "workspace_write_file":
+                announcement = f"Writing workspace file: {args.get('file_path', '')}..."
+            elif name == "workspace_edit_file":
+                announcement = f"Editing workspace file: {args.get('file_path', '')}..."
+            elif name == "workspace_delete_file":
+                announcement = f"Deleting workspace file: {args.get('file_path', '')}..."
+            elif name == "workspace_syntax_check":
+                announcement = f"Checking syntax for: {args.get('file_path', '')}..."
+            elif name == "run_matplotlib_script":
+                announcement = f"Generating professional chart using Matplotlib..."
+
+            if announcement:
+                await send_to_client({"type": "hud_log", "content": announcement})
+
+            if name == "browse_and_extract_tool":
+                u = args.get("url", "")
+                q = args.get("query", "")
+                if u:
+                    fetch_res = await web_fetch(u)
+                    tool_output = fetch_res.get("content", fetch_res.get("error", "No text content."))
+                    if isinstance(fetch_res, dict) and fetch_res.get("url") and "error" not in fetch_res:
+                        tool_context["consulted_sources"].append({"title": fetch_res.get("url"), "url": fetch_res.get("url")})
+                else:
+                    search_res = await web_search(q)
+                    tool_output = json.dumps(search_res)
+                    if isinstance(search_res, list):
+                        for r in search_res:
+                            if isinstance(r, dict) and r.get("url") and "error" not in r:
+                                tool_context["consulted_sources"].append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
+                                
+            elif name == "compact_chat_history":
+                from compaction import compact_session_history
+                summary = await compact_session_history(
+                    session_id=session_id,
+                    user_id=user_id,
+                    model_key=model_key,
+                    manager_ref=manager_ref,
+                    client_websocket=mobile_ws
+                )
+                from database import get_session_messages
+                from main import calculate_context_percent
+                messages_history = get_session_messages(session_id)
+                new_percent = calculate_context_percent(messages_history)
+                await send_to_client({"type": "context_sync", "percent": new_percent})
+            
+                confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
+                await send_to_client({"type": "token", "content": confirm_msg})
+                tool_output = f"Chat history successfully compacted. Compaction Summary: {summary}"
+
+            elif name == "run_matplotlib_script":
+                c = args.get("code", "")
+                t = args.get("title", "chart")
+                tool_output = run_matplotlib_script(c, t)
+
+            elif name == "query_rag":
+                q = args.get("query", "")
+                doc_id = tool_context.get("document_id")
+                if doc_id:
+                    docs = query_scoped_rag_vector(q, user_id, doc_id, threshold=-1.0)
+                else:
+                    docs = query_rag_vector(q, user_id, threshold=0.15)
+                tool_output = json.dumps(docs)
+            elif name == "list_indexed_documents":
+                docs = list_rag_documents(user_id)
+                tool_output = json.dumps(docs)
+            elif name == "delete_indexed_document":
+                doc_id_to_del = args.get("document_id")
+                filename_to_del = args.get("filename")
+                res = delete_rag_document(user_id, document_id=doc_id_to_del, filename=filename_to_del)
+                tool_output = json.dumps(res)
+            elif name == "remember_user":
+                c = args.get("category", "notes")
+                k = args.get("key", "")
+                v = args.get("value", "")
+                tool_output = remember_user(user_id, c, k, v)
+            elif name == "recall_user":
+                q = args.get("query", "")
+                tool_output = recall_user(user_id, q)
+            elif name == "forget_user":
+                c = args.get("category", "")
+                k = args.get("key", "")
+                tool_output = forget_user(user_id, c, k)
+            elif name == "log_problem":
+                prob = args.get("problem", "")
+                ctx = args.get("context", "")
+                att = args.get("attempted", "")
+                tool_output = f"Logged unsolved problem ID: {log_problem(user_id, prob, ctx, att)}"
+            elif name == "log_solution":
+                pid = args.get("problem_id", "")
+                sol = args.get("solution", "")
+                ww = args.get("what_worked", "")
+                prev = args.get("prevention", "")
+                tool_output = log_solution(user_id, pid, sol, ww, prev)
+            elif name == "search_memory":
+                q = args.get("query", "")
+                tool_output = search_memory(user_id, q)
+            elif name == "save_frontend_snippet":
+                t = args.get("title", "")
+                c = args.get("code", "")
+                d = args.get("description", "")
+                tg = args.get("tags", "")
+                tool_output = save_frontend_snippet(user_id, t, c, d, tg)
+            elif name == "search_frontend_snippets":
+                q = args.get("query", "")
+                tool_output = search_frontend_snippets(user_id, q)
+
+            elif name == "create_file":
+                f = args.get("filename", "")
+                d = args.get("directory", "")
+                c = args.get("content", "")
+                ft = args.get("file_type", "auto")
+                tool_output = server_create_file(f, d, c, ft)
+            elif name == "convert_file":
+                fp = args.get("file_path", "")
+                tf = args.get("target_format", "")
+                od = args.get("output_directory", "")
+                tool_output = server_convert_file(fp, tf, od)
+
+            elif name == "check_email":
+                q = args.get("query", "")
+                l = args.get("label", "INBOX")
+                mr = args.get("max_results", 5)
+                tool_output = check_email(q, l, mr)
+            elif name == "read_email":
+                eid = args.get("email_id", "")
+                tool_output = read_email(eid)
+            elif name == "send_email":
+                to = args.get("to", "")
+                sub = args.get("subject", "")
+                body = args.get("body", "")
+                cc = args.get("cc", "")
+                bcc = args.get("bcc", "")
+                tool_output = send_email(to, sub, body, cc, bcc)
+            elif name == "save_draft":
+                to = args.get("to", "")
+                sub = args.get("subject", "")
+                body = args.get("body", "")
+                cc = args.get("cc", "")
+                tool_output = save_draft(to, sub, body, cc)
+            elif name == "reply_to_email":
+                eid = args.get("email_id", "")
+                body = args.get("body", "")
+                tool_output = reply_to_email(eid, body)
+            elif name == "delete_email":
+                eid = args.get("email_id", "")
+                tool_output = delete_email(eid)
+            elif name == "delete_emails_bulk":
+                q = args.get("query", "")
+                md = args.get("max_delete", 20)
+                tool_output = delete_emails_bulk(q, md)
+            elif name == "mark_email_read":
+                eid = args.get("email_id", "")
+                tool_output = mark_email_read(eid)
+            elif name == "mark_email_unread":
+                eid = args.get("email_id", "")
+                tool_output = mark_email_unread(eid)
+            elif name == "archive_email":
+                eid = args.get("email_id", "")
+                tool_output = archive_email(eid)
+            elif name == "get_email_stats":
+                tool_output = get_email_stats()
+
+            elif name == "github_get_profile":
+                username = args.get("username")
+                tool_output = github_get_profile(username)
+            elif name == "github_list_my_repos":
+                limit = args.get("limit", 10)
+                sort = args.get("sort", "updated")
+                tool_output = github_list_my_repos(limit, sort)
+            elif name == "github_create_repo":
+                n = args.get("name", "")
+                desc = args.get("description", "")
+                p = args.get("private", True)
+                tool_output = github_create_repo(n, desc, p)
+            elif name == "github_actions_list":
+                repo = args.get("repo", "")
+                limit = args.get("limit", 10)
+                tool_output = github_actions_list(repo, limit)
+            elif name == "github_actions_get":
+                repo = args.get("repo", "")
+                run_id = args.get("run_id", "")
+                tool_output = github_actions_get(repo, run_id)
+            elif name == "github_get_job_logs":
+                repo = args.get("repo", "")
+                job_id = args.get("job_id", "")
+                tool_output = github_get_job_logs(repo, job_id)
+
+            elif name in ("search_spotify", "play_spotify_selection", "play_user_playlist", "media_control"):
+                action_map = {
+                    "search_spotify": "search",
+                    "play_spotify_selection": "play_selection",
+                    "play_user_playlist": "play_playlist",
+                    "media_control": "control"
+                }
+                tool_output = await run_laptop_spotify_command(manager_ref, user_id, action_map[name], args)
+
+            elif name == "laptop_command":
+                cmd = args.get("command", "")
+                if bridge_mode == "laptop":
+                    laptop_ws = manager_ref.active_laptops.get(user_id) if manager_ref else None
+                    if laptop_ws:
+                        loop = asyncio.get_running_loop()
+                        future = loop.create_future()
+                        LAPTOP_CHANNELS[user_id] = future
+                        await laptop_ws.send_text(json.dumps({"action": "execute", "command": cmd}))
+                        try:
+                            result_payload = await asyncio.wait_for(future, timeout=120.0)
+                            tool_output = result_payload.get("output", "Command executed successfully.")
+                        except asyncio.TimeoutError:
+                            tool_output = "Error: Laptop execution timed out (120s limit)."
+                        finally:
+                            if user_id in LAPTOP_CHANNELS:
+                                del LAPTOP_CHANNELS[user_id]
+                    else:
+                        tool_output = (
+                            "Error: No laptop is currently connected to this account. "
+                            "Please launch the VoxKage Laptop Daemon to run local actions, sir."
+                        )
+                elif bridge_mode == "mobile_local":
+                    if mobile_ws:
+                        try:
+                            import uuid
+                            req_id = str(uuid.uuid4())
+                            loop = asyncio.get_running_loop()
+                            future = loop.create_future()
+                            MOBILE_CHANNELS[req_id] = future
+                            await mobile_ws.send_text(json.dumps({
+                                "type": "mobile_tool_call",
+                                "request_id": req_id,
+                                "tool_name": "mobile_command",
+                                "arguments": {"command": cmd}
+                            }))
+                            try:
+                                result_payload = await asyncio.wait_for(future, timeout=120.0)
+                                status_res = result_payload.get("status")
+                                result_val = result_payload.get("result")
+                                if status_res == "success":
+                                    tool_output = json.dumps(result_val) if not isinstance(result_val, str) else result_val
+                                else:
+                                    tool_output = f"Error executing mobile command, Sir: {result_val}"
+                            except asyncio.TimeoutError:
+                                tool_output = "Error: Mobile device command execution timed out (120s limit)."
+                            finally:
+                                if req_id in MOBILE_CHANNELS:
+                                    del MOBILE_CHANNELS[req_id]
+                        except Exception as e:
+                            tool_output = f"Error routing command to mobile device: {str(e)}"
+                    else:
+                        tool_output = "Error: Active mobile client connection is not available to route local device commands, sir."
+
+            elif name.startswith("mobile_"):
+                import uuid
+                req_id = str(uuid.uuid4())
+                loop = asyncio.get_running_loop()
+                future = loop.create_future()
+                MOBILE_CHANNELS[req_id] = future
+                if mobile_ws:
+                    await mobile_ws.send_text(json.dumps({
+                        "type": "mobile_tool_call",
+                        "request_id": req_id,
+                        "tool_name": name,
+                        "arguments": args
+                    }))
+                    try:
+                        result_payload = await asyncio.wait_for(future, timeout=60.0)
+                        status_res = result_payload.get("status")
+                        result_val = result_payload.get("result")
+                        if status_res == "success":
+                            tool_output = json.dumps(result_val) if not isinstance(result_val, str) else result_val
+                        else:
+                            tool_output = f"Error executing device tool, Sir: {result_val}"
+                    except asyncio.TimeoutError:
+                        tool_output = "Error: Mobile device tool execution timed out (60s limit)."
+                    finally:
+                        if req_id in MOBILE_CHANNELS:
+                            del MOBILE_CHANNELS[req_id]
+                else:
+                    tool_output = "Error: Active WebSocket is not available to route device command."
+
+            elif name == "get_current_datetime":
+                if client_time:
+                    tool_output = json.dumps({
+                        "local_time_details": client_time,
+                        "timezone": "Client Local Time"
+                    })
+                else:
+                    tool_output = json.dumps({
+                        "current_time": datetime.now().strftime("%I:%M:%S %p"),
+                        "current_date": datetime.now().strftime("%A, %B %d, %Y"),
+                        "timezone": "Server UTC Time",
+                        "timestamp": datetime.now().isoformat()
+                    })
+
+            elif name == "workspace_list_files":
+                project_id = ensure_active_project(user_id, session_id, active_project_box)
+                base_dir = os.path.join("projects", str(project_id))
+                files_list = []
+                if os.path.exists(base_dir):
+                    for root, _, files in os.walk(base_dir):
+                        for f in files:
+                            full_path = os.path.join(root, f)
+                            rel_path = os.path.relpath(full_path, base_dir).replace("\\", "/")
+                            files_list.append(rel_path)
+                tool_output = json.dumps({"files": sorted(files_list)})
+
+            elif name == "workspace_read_file":
+                file_path = args.get("file_path", "")
+                if not file_path:
+                    tool_output = "Error: file_path argument is required."
+                else:
+                    project_id = ensure_active_project(user_id, session_id, active_project_box)
+                    base_dir = os.path.join("projects", str(project_id))
+                    try:
+                        safe_path = get_safe_workspace_path(base_dir, file_path)
+                        if os.path.exists(safe_path):
+                            with open(safe_path, "r", encoding="utf-8") as f:
+                                content = f.read()
+                            tool_output = content
+                        else:
+                            tool_output = f"Error: File '{file_path}' does not exist in workspace."
+                    except Exception as e:
+                        tool_output = f"Error: {str(e)}"
+
+            elif name == "workspace_write_file":
+                file_path = args.get("file_path", "")
+                content = args.get("content", "")
+                if not file_path:
+                    tool_output = "Error: file_path argument is required."
+                else:
+                    project_id = ensure_active_project(user_id, session_id, active_project_box)
+                    base_dir = os.path.join("projects", str(project_id))
+                    try:
+                        safe_path = get_safe_workspace_path(base_dir, file_path)
+                        os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+                        with open(safe_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        tool_output = f"Success: Wrote '{file_path}' ({len(content)} characters)."
+                    except Exception as e:
+                        tool_output = f"Error: {str(e)}"
+
+            elif name == "workspace_edit_file":
+                file_path = args.get("file_path", "")
+                search_content = args.get("search_content", "")
+                replace_content = args.get("replace_content", "")
+                if not file_path:
+                    tool_output = "Error: file_path argument is required."
+                else:
+                    project_id = ensure_active_project(user_id, session_id, active_project_box)
+                    base_dir = os.path.join("projects", str(project_id))
+                    try:
+                        safe_path = get_safe_workspace_path(base_dir, file_path)
+                        if os.path.exists(safe_path):
+                            with open(safe_path, "r", encoding="utf-8") as f:
+                                existing_content = f.read()
+                            if search_content not in existing_content:
+                                tool_output = f"Error: The target search content was not found in '{file_path}'."
+                            else:
+                                new_content = existing_content.replace(search_content, replace_content)
+                                with open(safe_path, "w", encoding="utf-8") as f:
+                                    f.write(new_content)
+                                tool_output = f"Success: Replaced occurrences in '{file_path}'."
+                        else:
+                            tool_output = f"Error: File '{file_path}' does not exist in workspace."
+                    except Exception as e:
+                        tool_output = f"Error: {str(e)}"
+
+            elif name == "workspace_delete_file":
+                file_path = args.get("file_path", "")
+                if not file_path:
+                    tool_output = "Error: file_path argument is required."
+                else:
+                    project_id = ensure_active_project(user_id, session_id, active_project_box)
+                    base_dir = os.path.join("projects", str(project_id))
+                    try:
+                        safe_path = get_safe_workspace_path(base_dir, file_path)
+                        if os.path.exists(safe_path):
+                            os.remove(safe_path)
+                            tool_output = f"Success: Deleted '{file_path}'."
+                        else:
+                            tool_output = f"Error: File '{file_path}' does not exist in workspace."
+                    except Exception as e:
+                        tool_output = f"Error: {str(e)}"
+
+            elif name == "workspace_syntax_check":
+                file_path = args.get("file_path", "")
+                if not file_path:
+                    tool_output = "Error: file_path argument is required."
+                else:
+                    project_id = ensure_active_project(user_id, session_id, active_project_box)
+                    base_dir = os.path.join("projects", str(project_id))
+                    try:
+                        safe_path = get_safe_workspace_path(base_dir, file_path)
+                        if not os.path.exists(safe_path):
+                            tool_output = f"Error: File '{file_path}' does not exist."
+                        else:
+                            with open(safe_path, "r", encoding="utf-8") as f:
+                                content = f.read()
+                        
+                            errors = []
+                            if file_path.endswith(".html"):
+                                from html.parser import HTMLParser
+                                class SimpleHTMLValidator(HTMLParser):
+                                    def __init__(self):
+                                        super().__init__()
+                                        self.tags = []
+                                        self.errors = []
+                                    def handle_starttag(self, tag, attrs):
+                                        self_closing = {'img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'embed', 'param', 'col', 'area', 'track'}
+                                        if tag not in self_closing:
+                                            self.tags.append((tag, self.getpos()))
+                                    def handle_endtag(self, tag):
+                                        self_closing = {'img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'embed', 'param', 'col', 'area', 'track'}
+                                        if tag in self_closing:
+                                            return
+                                        if not self.tags:
+                                            self.errors.append(f"Unexpected end tag </{tag}> on line {self.getpos()[0]}, col {self.getpos()[1]}")
+                                        else:
+                                            start_tag, pos = self.tags.pop()
+                                            if start_tag != tag:
+                                                self.errors.append(f"Mismatched tag: expected </{start_tag}> (opened line {pos[0]}), found </{tag}> on line {self.getpos()[0]}")
+                            
+                                parser = SimpleHTMLValidator()
+                                try:
+                                    parser.feed(content)
+                                    if parser.tags:
+                                        for tag, pos in parser.tags:
+                                            parser.errors.append(f"Unclosed tag <{tag}> opened on line {pos[0]}, col {pos[1]}")
+                                    errors = parser.errors
+                                except Exception as he:
+                                    errors.append(f"HTML Parser error: {str(he)}")
+                        
+                            elif file_path.endswith(".js"):
+                                stack = []
+                                mapping = {')': '(', '}': '{', ']': '['}
+                                lines = content.splitlines()
+                                for line_idx, line in enumerate(lines, 1):
+                                    clean_line = ""
+                                    in_string = False
+                                    string_char = None
+                                    skip_next = False
+                                    for idx, char in enumerate(line):
+                                        if skip_next:
+                                            skip_next = False
+                                            continue
+                                        if char == '\\' and in_string:
+                                            skip_next = True
+                                            continue
+                                        if char in ('"', "'", '`'):
+                                            if not in_string:
+                                                in_string = True
+                                                string_char = char
+                                            elif string_char == char:
+                                                in_string = False
+                                        elif not in_string:
+                                            if char == '/' and idx < len(line) - 1 and line[idx+1] == '/':
+                                                break
+                                            clean_line += char
+                                
+                                    for char in clean_line:
+                                        if char in mapping.values():
+                                            stack.append((char, line_idx))
+                                        elif char in mapping.keys():
+                                            if not stack:
+                                                errors.append(f"Mismatched closure: unexpected '{char}' on line {line_idx}")
+                                                break
+                                            else:
+                                                top, start_line = stack.pop()
+                                                if top != mapping[char]:
+                                                    errors.append(f"Mismatched brackets: '{char}' on line {line_idx} does not match '{top}' from line {start_line}")
+                                                    break
+                                if stack:
+                                    for char, line_idx in stack:
+                                        errors.append(f"Unclosed opening bracket '{char}' on line {line_idx}")
+
+                            if errors:
+                                tool_output = json.dumps({"status": "error", "errors": errors})
+                            else:
+                                tool_output = json.dumps({"status": "success", "message": f"Syntax check passed for '{file_path}'."})
+                    except Exception as e:
+                        tool_output = f"Error performing syntax check: {str(e)}"
+            else:
+                tool_output = f"Error: Tool '{name}' is not supported."
+
+        await send_to_client({"type": "tool_success", "node_id": tc_id})
+        short_res = str(tool_output)[:120] + '...' if len(str(tool_output)) > 120 else str(tool_output)
+        await send_to_client({"type": "agent_thought", "content": f"Completed {name} successfully. Result: {short_res}"})
+        return (tc_id, tool_output, True)
+
+    except Exception as e:
+        try:
+            tc_id = tc.get("id", "unknown")
+            name = tc.get("function", {}).get("name", "unknown")
+        except:
+            tc_id = "unknown"
+            name = "unknown"
+        await send_to_client({"type": "tool_failed", "node_id": tc_id})
+        await send_to_client({"type": "agent_thought", "content": f"Error in {name}: {str(e)}"})
+        return (tc_id, f'Error executing tool {name}: {str(e)}', False)
+
+
 async def _run_agentic_loop_impl(
     prompt: str,
     user_id: str,
@@ -224,7 +1158,9 @@ async def _run_agentic_loop_impl(
     client_websocket = None,
     variant: str = "High",
     document_id: str = None,
-    image_base64: str = None
+    image_base64: str = None,
+    bridge_mode: str = "laptop",
+    mobile_local_ip: str = None
 ) -> AsyncGenerator[str, None]:
     """
     Unified agent loop intercepting and executing tool calls locally in the backend,
@@ -354,6 +1290,7 @@ async def _run_agentic_loop_impl(
         try:
             current_tool_calls = []
             assistant_text = ""
+            raw_assistant_text = ""
             hud_parser = HudStreamParser()
 
             # Delegate completion stream query to proxy client
@@ -386,6 +1323,7 @@ async def _run_agentic_loop_impl(
                 # Stream assistant content delta
                 if delta.get("content"):
                     content_delta = delta["content"]
+                    raw_assistant_text += content_delta
                     for packet in hud_parser.feed(content_delta):
                         yield json.dumps(packet)
                         if packet["type"] == "token":
@@ -396,6 +1334,11 @@ async def _run_agentic_loop_impl(
                 yield json.dumps(packet)
                 if packet["type"] == "token":
                     assistant_text += packet["content"]
+
+            # Parse DSML XML tool calls
+            _, dsml_calls = parse_dsml_tool_calls(raw_assistant_text)
+            if dsml_calls:
+                current_tool_calls.extend(dsml_calls)
 
             # Update conversation list
             if assistant_text:
@@ -422,781 +1365,7 @@ async def _run_agentic_loop_impl(
                 ]
             })
 
-            async def execute_tool_call(tc):
-                nonlocal web_search_called
-                try:
-                    name = tc["function"]["name"]
-                    args_str = tc["function"]["arguments"]
-                    try:
-                        args = json.loads(args_str or "{}")
-                    except:
-                        args = {}
-
-                    if name in {"web_search", "web_fetch", "web_search_parallel", "web_fetch_parallel", "web_search_deep", "browse_and_extract_tool"}:
-                        web_search_called = True
-                        import urllib.parse
-                        if name == "web_search" or name == "web_search_deep":
-                            q = args.get("query", "")
-                            if q:
-                                consulted_sources.append({
-                                    "title": f"DuckDuckGo Search: {q}",
-                                    "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
-                                })
-                        elif name == "web_fetch":
-                            u = args.get("url", "")
-                            if u:
-                                consulted_sources.append({"title": u, "url": u})
-                        elif name == "web_search_parallel":
-                            for q in args.get("queries", []):
-                                if q:
-                                    consulted_sources.append({
-                                        "title": f"DuckDuckGo Search: {q}",
-                                        "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
-                                    })
-                        elif name == "web_fetch_parallel":
-                            for u in args.get("urls", []):
-                                if u:
-                                    consulted_sources.append({"title": u, "url": u})
-                        elif name == "browse_and_extract_tool":
-                            u = args.get("url", "")
-                            q = args.get("query", "")
-                            if u:
-                                consulted_sources.append({"title": u, "url": u})
-                            elif q:
-                                consulted_sources.append({
-                                    "title": f"DuckDuckGo Search: {q}",
-                                    "url": f"https://duckduckgo.com/?q={urllib.parse.quote(q)}"
-                                })
-
-                    tc_id = tc["id"]
-                    tool_label = get_tool_label(name, args)
-
-                    # Interactive confirmation with Always Allow support
-                    CONFIRMATION_REQUIRED_TOOLS = {"mobile_send_sms", "mobile_create_calendar_event", "mobile_create_contact"}
-                    if name in CONFIRMATION_REQUIRED_TOOLS:
-                        from memory_engine import check_trusted, set_trusted_action
-                        trust_status = check_trusted(user_id, name)
-                        if "trusted" not in trust_status:
-                            import uuid
-                            confirm_req_id = str(uuid.uuid4())
-                            loop = asyncio.get_running_loop()
-                            confirm_future = loop.create_future()
-                            CONFIRMATION_CHANNELS[confirm_req_id] = confirm_future
-                        
-                            label_map = {
-                                "mobile_send_sms": "Send SMS",
-                                "mobile_create_calendar_event": "Create Calendar Event",
-                                "mobile_create_contact": "Create Contact"
-                            }
-                            if client_websocket:
-                                await client_websocket.send_text(json.dumps({
-                                    "type": "tool_confirm_request",
-                                    "request_id": confirm_req_id,
-                                    "tool_name": name,
-                                    "label": label_map.get(name, name)
-                                }))
-                                await client_websocket.send_text(json.dumps({
-                                    "type": "agent_thought",
-                                    "content": f"Waiting for user confirmation to execute: {name}..."
-                                }))
-                                try:
-                                    confirm_payload = await asyncio.wait_for(confirm_future, timeout=120.0)
-                                    confirm_choice = confirm_payload.get("confirm", False)
-                                    always_allow = confirm_payload.get("always_allow", False)
-                                
-                                    if not confirm_choice:
-                                        if confirm_req_id in CONFIRMATION_CHANNELS:
-                                            del CONFIRMATION_CHANNELS[confirm_req_id]
-                                        raise Exception("Action rejected by user, Sir.")
-                                
-                                    if always_allow:
-                                        set_trusted_action(user_id, name, True, "User clicked Always Allow in chat screen")
-                                        await client_websocket.send_text(json.dumps({
-                                            "type": "agent_thought",
-                                            "content": f"Tool '{name}' marked as always allowed."
-                                        }))
-                                except asyncio.TimeoutError:
-                                    if confirm_req_id in CONFIRMATION_CHANNELS:
-                                        del CONFIRMATION_CHANNELS[confirm_req_id]
-                                    raise Exception("Action confirmation timed out (120s limit).")
-                                finally:
-                                    if confirm_req_id in CONFIRMATION_CHANNELS:
-                                        del CONFIRMATION_CHANNELS[confirm_req_id]
-                            else:
-                                raise Exception("No active connection to prompt confirmation, Sir.")
-
-
-                    # Execute Tool
-                    tool_output = ""
-                
-                    # Stream tool call announcement directly to the user's chat bubble
-                    announcement = ""
-                    if name == "web_search":
-                        announcement = f"\n*[Searching the web for: \"{args.get('query', '')}\"...]*\n\n"
-                    elif name == "web_fetch":
-                        announcement = f"\n*[Fetching content from URL: {args.get('url', '')}...]*\n\n"
-                    elif name == "web_search_parallel":
-                        announcement = f"\n*[Performing parallel web searches...]*\n\n"
-                    elif name == "web_fetch_parallel":
-                        announcement = f"\n*[Fetching multiple web pages in parallel...]*\n\n"
-                    elif name == "web_search_deep":
-                        announcement = f"\n*[Performing deep search and fetching web contents for: \"{args.get('query', '')}\"...]*\n\n"
-                    elif name == "browse_and_extract_tool":
-                        target = args.get("url") or args.get("query") or ""
-                        announcement = f"\n*[Browsing and extracting text content for: \"{target}\"...]*\n\n"
-                    elif name == "query_rag":
-                        announcement = f"\n*[Searching Supabase pgvector RAG memory database for matches...]*\n\n"
-                    elif name == "list_indexed_documents":
-                        announcement = f"\n*[Listing all permanently indexed documents in RAG database...]*\n\n"
-                    elif name == "delete_indexed_document":
-                        target_name = args.get("filename") or args.get("document_id") or ""
-                        announcement = f"\n*[Deleting document: \"{target_name}\" from Supabase vector RAG database...]*\n\n"
-                    elif name == "remember_user":
-                        announcement = f"\n*[Updating your profile memories with new facts...]*\n\n"
-                    elif name == "recall_user":
-                        announcement = f"\n*[Accessing profile memory to recall facts...]*\n\n"
-                    elif name == "forget_user":
-                        announcement = f"\n*[Removing fact from profile memory...]*\n\n"
-                    elif name == "log_problem":
-                        announcement = f"\n*[Logging system problem: \"{args.get('problem', '')}\"...]*\n\n"
-                    elif name == "log_solution":
-                        announcement = f"\n*[Logging solution for problem ID: {args.get('problem_id', '')}...]*\n\n"
-                    elif name == "search_memory":
-                        announcement = f"\n*[Searching system problem/solution memories for: \"{args.get('query', '')}\"...]*\n\n"
-                    elif name == "save_frontend_snippet":
-                        announcement = f"\n*[Saving frontend code snippet: \"{args.get('title', '')}\"...]*\n\n"
-                    elif name == "search_frontend_snippets":
-                        announcement = f"\n*[Searching saved frontend snippets for: \"{args.get('query', '')}\"...]*\n\n"
-                    elif name == "create_file":
-                        announcement = f"\n*[Creating file: {args.get('filename', '')} in {args.get('directory', 'workspace')}...]*\n\n"
-                    elif name == "convert_file":
-                        announcement = f"\n*[Converting file format for: {args.get('file_path', '')}...]*\n\n"
-                    elif name == "laptop_command":
-                        cmd = args.get("command", "")
-                        announcement = f"\n*[Executing laptop shell command: `{cmd}`...]*\n\n"
-                    elif name == "open_application":
-                        announcement = f"\n*[Opening application: {args.get('app_name', '')}...]*\n\n"
-                    elif name == "close_application":
-                        announcement = f"\n*[Closing application: {args.get('app_name', '')}...]*\n\n"
-                    elif name == "media_control":
-                        announcement = f"\n*[Controlling media playback: {args.get('action', '')}...]*\n\n"
-                    elif name == "play_user_playlist":
-                        announcement = f"\n*[Playing Spotify playlist: {args.get('playlist_name', '')}...]*\n\n"
-                    elif name == "play_spotify_selection":
-                        announcement = f"\n*[Playing Spotify track number: {args.get('number', '')}...]*\n\n"
-                    elif name == "search_spotify":
-                        announcement = f"\n*[Searching Spotify for: \"{args.get('query', '')}\"...]*\n\n"
-                    elif name == "send_email":
-                        announcement = f"\n*[Sending email via Gmail to: {args.get('to', '')}...]*\n\n"
-                    elif name == "check_email":
-                        announcement = f"\n*[Checking Gmail inbox for new messages...]*\n\n"
-                    elif name == "read_email":
-                        announcement = f"\n*[Opening and reading email ID: {args.get('email_id', '')}...]*\n\n"
-                    elif name == "save_draft":
-                        announcement = f"\n*[Saving email draft to: {args.get('to', '')}...]*\n\n"
-                    elif name == "reply_to_email":
-                        announcement = f"\n*[Replying to email ID: {args.get('email_id', '')}...]*\n\n"
-                    elif name == "delete_email":
-                        announcement = f"\n*[Deleting email ID: {args.get('email_id', '')}...]*\n\n"
-                    elif name == "delete_emails_bulk":
-                        announcement = f"\n*[Deleting emails in bulk matching: \"{args.get('query', '')}\"...]*\n\n"
-                    elif name == "mark_email_read":
-                        announcement = f"\n*[Marking email ID: {args.get('email_id', '')} as read...]*\n\n"
-                    elif name == "mark_email_unread":
-                        announcement = f"\n*[Marking email ID: {args.get('email_id', '')} as unread...]*\n\n"
-                    elif name == "archive_email":
-                        announcement = f"\n*[Archiving email ID: {args.get('email_id', '')}...]*\n\n"
-                    elif name == "get_email_stats":
-                        announcement = f"\n*[Fetching email inbox statistics...]*\n\n"
-                    elif name == "github_get_profile":
-                        announcement = f"\n*[Retrieving GitHub profile for: {args.get('username', '')}...]*\n\n"
-                    elif name == "github_list_my_repos":
-                        announcement = f"\n*[Fetching your list of GitHub repositories...]*\n\n"
-                    elif name == "github_create_repo":
-                        announcement = f"\n*[Creating new GitHub repository: {args.get('name', '')}...]*\n\n"
-                    elif name == "github_actions_list":
-                        announcement = f"\n*[Listing GitHub Action runs for repository: {args.get('repo', '')}...]*\n\n"
-                    elif name == "github_actions_get":
-                        announcement = f"\n*[Fetching details for GitHub Action run ID: {args.get('run_id', '')}...]*\n\n"
-                    elif name == "github_get_job_logs":
-                        announcement = f"\n*[Retrieving logs for GitHub Job ID: {args.get('job_id', '')}...]*\n\n"
-                    elif name == "get_current_datetime":
-                        announcement = f"\n*[Checking system clock for current date and time...]*\n\n"
-                    elif name == "workspace_list_files":
-                        announcement = f"\n*[Listing active workspace files...]*\n\n"
-                    elif name == "workspace_read_file":
-                        announcement = f"\n*[Reading workspace file: {args.get('file_path', '')}...]*\n\n"
-                    elif name == "workspace_write_file":
-                        announcement = f"\n*[Writing workspace file: {args.get('file_path', '')}...]*\n\n"
-                    elif name == "workspace_edit_file":
-                        announcement = f"\n*[Editing workspace file: {args.get('file_path', '')}...]*\n\n"
-                    elif name == "workspace_delete_file":
-                        announcement = f"\n*[Deleting workspace file: {args.get('file_path', '')}...]*\n\n"
-                    elif name == "workspace_syntax_check":
-                        announcement = f"\n*[Checking syntax for: {args.get('file_path', '')}...]*\n\n"
-                    elif name == "run_matplotlib_script":
-                        announcement = f"\n*[Generating professional chart using Matplotlib...]*\n\n"
-                    elif name == "fetch_images_for_query":
-                        announcement = f"\n*[Searching for authentic source images: {args.get('query', '')}...]*\n\n"
-                    else:
-                        announcement = f"\n*[Executing tool: {name}...]*\n\n"
-
-                    if announcement:
-                        # Automatically extract and stream hud_log for thinking bubble
-                        hud_msg = announcement.strip().replace("*[", "").replace("]*", "")
-                        if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": hud_msg}))
-
-                    try:
-                        # --- Web Research ---
-                        if name == "web_search":
-                            q = args.get("query", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Searching the web for: {q}"}))
-                            search_res = await web_search(q)
-                            tool_output = json.dumps(search_res)
-                            if isinstance(search_res, list):
-                                for r in search_res:
-                                    if isinstance(r, dict) and r.get("url") and "error" not in r:
-                                        consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
-                        elif name == "web_fetch":
-                            u = args.get("url", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching URL content: {u}"}))
-                            fetch_res = await web_fetch(u)
-                            tool_output = json.dumps(fetch_res)
-                            if isinstance(fetch_res, dict) and fetch_res.get("url") and "error" not in fetch_res:
-                                consulted_sources.append({"title": fetch_res.get("url"), "url": fetch_res.get("url")})
-                        elif name == "web_search_parallel":
-                            queries = args.get("queries", [])
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Searching multiple queries in parallel..."}))
-                            search_res = await web_search_parallel(queries)
-                            tool_output = json.dumps(search_res)
-                            if isinstance(search_res, list):
-                                for sub_list in search_res:
-                                    if isinstance(sub_list, list):
-                                        for r in sub_list:
-                                            if isinstance(r, dict) and r.get("url") and "error" not in r:
-                                                consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
-                        elif name == "web_fetch_parallel":
-                            urls = args.get("urls", [])
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching multiple URLs in parallel..."}))
-                            fetch_res = await web_fetch_parallel(urls)
-                            tool_output = json.dumps(fetch_res)
-                            if isinstance(fetch_res, list):
-                                for r in fetch_res:
-                                    if isinstance(r, dict) and r.get("url") and "error" not in r:
-                                        consulted_sources.append({"title": r.get("url"), "url": r.get("url")})
-                        elif name == "web_search_deep":
-                            q = args.get("query", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Performing deep web search for: {q}"}))
-                            deep_res = await web_search_deep(q)
-                            tool_output = json.dumps(deep_res)
-                            if isinstance(deep_res, list):
-                                for r in deep_res:
-                                    if isinstance(r, dict) and r.get("url") and "error" not in r:
-                                        consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
-                        elif name == "browse_and_extract_tool":
-                            u = args.get("url", "")
-                            q = args.get("query", "")
-                            if u:
-                                if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching URL: {u}"}))
-                                fetch_res = await web_fetch(u)
-                                tool_output = fetch_res.get("content", fetch_res.get("error", "No text content."))
-                                if isinstance(fetch_res, dict) and fetch_res.get("url") and "error" not in fetch_res:
-                                    consulted_sources.append({"title": fetch_res.get("url"), "url": fetch_res.get("url")})
-                            else:
-                                if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Searching: {q}"}))
-                                search_res = await web_search(q)
-                                tool_output = json.dumps(search_res)
-                                if isinstance(search_res, list):
-                                    for r in search_res:
-                                        if isinstance(r, dict) and r.get("url") and "error" not in r:
-                                            consulted_sources.append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
-
-                        elif name == "compact_chat_history":
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": "Compacting chat history..."}))
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "token", "content": "\n|-------- COMPACTION PROCESSING --------|\n"}))
-                            from compaction import compact_session_history
-                            summary = await compact_session_history(
-                                session_id=session_id,
-                                user_id=user_id,
-                                model_key=model_key,
-                                manager_ref=manager_ref,
-                                client_websocket=client_websocket
-                            )
-                            # Fetch updated context sync percent
-                            from database import get_session_messages
-                            from main import calculate_context_percent
-                            messages_history = get_session_messages(session_id)
-                            new_percent = calculate_context_percent(messages_history)
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "context_sync", "percent": new_percent}))
-                        
-                            confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "token", "content": confirm_msg}))
-                            tool_output = f"Chat history successfully compacted. Compaction Summary: {summary}"
-
-                        elif name == "run_matplotlib_script":
-                            c = args.get("code", "")
-                            t = args.get("title", "chart")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Running Matplotlib script..."}))
-                            tool_output = run_matplotlib_script(c, t)
-                        elif name == "fetch_images_for_query":
-                            q = args.get("query", "")
-                            lim = args.get("limit", 5)
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Fetching images for: {q}"}))
-                            tool_output = fetch_images_for_query(q, lim)
-
-                        # --- Memory & RAG ---
-                        elif name == "query_rag":
-                            q = args.get("query", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Retrieving RAG document matches..."}))
-                            if document_id:
-                                docs = query_scoped_rag_vector(q, user_id, document_id, threshold=-1.0)
-                            else:
-                                docs = query_rag_vector(q, user_id, threshold=0.15)
-                            tool_output = json.dumps(docs)
-                        elif name == "list_indexed_documents":
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Listing all permanently indexed documents..."}))
-                            docs = list_rag_documents(user_id)
-                            tool_output = json.dumps(docs)
-                        elif name == "delete_indexed_document":
-                            doc_id_to_del = args.get("document_id")
-                            filename_to_del = args.get("filename")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Deleting matching RAG chunks..."}))
-                            res = delete_rag_document(user_id, document_id=doc_id_to_del, filename=filename_to_del)
-                            tool_output = json.dumps(res)
-                        elif name == "remember_user":
-                            c = args.get("category", "notes")
-                            k = args.get("key", "")
-                            v = args.get("value", "")
-                            tool_output = remember_user(user_id, c, k, v)
-                        elif name == "recall_user":
-                            q = args.get("query", "")
-                            tool_output = recall_user(user_id, q)
-                        elif name == "forget_user":
-                            c = args.get("category", "")
-                            k = args.get("key", "")
-                            tool_output = forget_user(user_id, c, k)
-                        elif name == "log_problem":
-                            prob = args.get("problem", "")
-                            ctx = args.get("context", "")
-                            att = args.get("attempted", "")
-                            tool_output = f"Logged unsolved problem ID: {log_problem(user_id, prob, ctx, att)}"
-                        elif name == "log_solution":
-                            pid = args.get("problem_id", "")
-                            sol = args.get("solution", "")
-                            ww = args.get("what_worked", "")
-                            prev = args.get("prevention", "")
-                            tool_output = log_solution(user_id, pid, sol, ww, prev)
-                        elif name == "search_memory":
-                            q = args.get("query", "")
-                            tool_output = search_memory(user_id, q)
-                        elif name == "save_frontend_snippet":
-                            t = args.get("title", "")
-                            c = args.get("code", "")
-                            d = args.get("description", "")
-                            tg = args.get("tags", "")
-                            tool_output = save_frontend_snippet(user_id, t, c, d, tg)
-                        elif name == "search_frontend_snippets":
-                            q = args.get("query", "")
-                            tool_output = search_frontend_snippets(user_id, q)
-
-                        # --- Document Generation ---
-                        elif name == "create_file":
-                            f = args.get("filename", "")
-                            d = args.get("directory", "")
-                            c = args.get("content", "")
-                            ft = args.get("file_type", "auto")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Rendering file: {f}"}))
-                            tool_output = server_create_file(f, d, c, ft)
-                        elif name == "convert_file":
-                            fp = args.get("file_path", "")
-                            tf = args.get("target_format", "")
-                            od = args.get("output_directory", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Converting: {os.path.basename(fp)}"}))
-                            tool_output = server_convert_file(fp, tf, od)
-
-                        # --- Email (Gmail) ---
-                        elif name == "check_email":
-                            q = args.get("query", "")
-                            l = args.get("label", "INBOX")
-                            mr = args.get("max_results", 5)
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Checking emails..."}))
-                            tool_output = check_email(q, l, mr)
-                        elif name == "read_email":
-                            eid = args.get("email_id", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Reading email content..."}))
-                            tool_output = read_email(eid)
-                        elif name == "send_email":
-                            to = args.get("to", "")
-                            sub = args.get("subject", "")
-                            body = args.get("body", "")
-                            cc = args.get("cc", "")
-                            bcc = args.get("bcc", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Sending email..."}))
-                            tool_output = send_email(to, sub, body, cc, bcc)
-                        elif name == "save_draft":
-                            to = args.get("to", "")
-                            sub = args.get("subject", "")
-                            body = args.get("body", "")
-                            cc = args.get("cc", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Saving draft..."}))
-                            tool_output = save_draft(to, sub, body, cc)
-                        elif name == "reply_to_email":
-                            eid = args.get("email_id", "")
-                            body = args.get("body", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Replying to thread..."}))
-                            tool_output = reply_to_email(eid, body)
-                        elif name == "delete_email":
-                            eid = args.get("email_id", "")
-                            tool_output = delete_email(eid)
-                        elif name == "delete_emails_bulk":
-                            q = args.get("query", "")
-                            md = args.get("max_delete", 20)
-                            tool_output = delete_emails_bulk(q, md)
-                        elif name == "mark_email_read":
-                            eid = args.get("email_id", "")
-                            tool_output = mark_email_read(eid)
-                        elif name == "mark_email_unread":
-                            eid = args.get("email_id", "")
-                            tool_output = mark_email_unread(eid)
-                        elif name == "archive_email":
-                            eid = args.get("email_id", "")
-                            tool_output = archive_email(eid)
-                        elif name == "get_email_stats":
-                            tool_output = get_email_stats()
-
-                        # --- GitHub API ---
-                        elif name == "github_get_profile":
-                            username = args.get("username")
-                            tool_output = github_get_profile(username)
-                        elif name == "github_list_my_repos":
-                            limit = args.get("limit", 10)
-                            sort = args.get("sort", "updated")
-                            tool_output = github_list_my_repos(limit, sort)
-                        elif name == "github_create_repo":
-                            n = args.get("name", "")
-                            desc = args.get("description", "")
-                            p = args.get("private", True)
-                            tool_output = github_create_repo(n, desc, p)
-                        elif name == "github_actions_list":
-                            repo = args.get("repo", "")
-                            limit = args.get("limit", 10)
-                            tool_output = github_actions_list(repo, limit)
-                        elif name == "github_actions_get":
-                            repo = args.get("repo", "")
-                            run_id = args.get("run_id", "")
-                            tool_output = github_actions_get(repo, run_id)
-                        elif name == "github_get_job_logs":
-                            repo = args.get("repo", "")
-                            job_id = args.get("job_id", "")
-                            tool_output = github_get_job_logs(repo, job_id)
-
-                        # --- Spotify (Remote Control) ---
-                        elif name in ("search_spotify", "play_spotify_selection", "play_user_playlist", "media_control"):
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Sending remote playback command..."}))
-                            action_map = {
-                                "search_spotify": "search",
-                                "play_spotify_selection": "play_selection",
-                                "play_user_playlist": "play_playlist",
-                                "media_control": "control"
-                            }
-                            tool_output = await run_laptop_spotify_command(manager_ref, user_id, action_map[name], args)
-
-                        # --- Laptop PowerShell Execution ---
-                        elif name == "laptop_command":
-                            cmd = args.get("command", "")
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Executing command on laptop: {cmd}"}))
-                        
-                            if manager_ref and user_id in manager_ref.active_laptops:
-                                ws_laptop = manager_ref.active_laptops[user_id]
-                            
-                                loop = asyncio.get_running_loop()
-                                future = loop.create_future()
-                                LAPTOP_CHANNELS[user_id] = future
-                            
-                                await ws_laptop.send_text(json.dumps({"action": "execute", "command": cmd}))
-                            
-                                try:
-                                    result_payload = await asyncio.wait_for(future, timeout=120.0)
-                                    tool_output = result_payload.get("output", "Command executed successfully.")
-                                except asyncio.TimeoutError:
-                                    tool_output = "Error: Laptop execution timed out (120s limit)."
-                                finally:
-                                    if user_id in LAPTOP_CHANNELS:
-                                        del LAPTOP_CHANNELS[user_id]
-                            else:
-                                tool_output = (
-                                    "Error: No laptop is currently connected to this account. "
-                                    "Please launch the VoxKage Laptop Daemon to run local actions, sir."
-                                )
-                        elif name.startswith("mobile_"):
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Requesting device action: {name}"}))
-                        
-                            import uuid
-                            req_id = str(uuid.uuid4())
-                        
-                            loop = asyncio.get_running_loop()
-                            future = loop.create_future()
-                            MOBILE_CHANNELS[req_id] = future
-                        
-                            if client_websocket:
-                                await client_websocket.send_text(json.dumps({
-                                    "type": "mobile_tool_call",
-                                    "request_id": req_id,
-                                    "tool_name": name,
-                                    "arguments": args
-                                }))
-                            
-                                try:
-                                    result_payload = await asyncio.wait_for(future, timeout=60.0)
-                                    status_res = result_payload.get("status")
-                                    result_val = result_payload.get("result")
-                                
-                                    if status_res == "success":
-                                        tool_output = json.dumps(result_val)
-                                    else:
-                                        tool_output = f"Error executing device tool, Sir: {result_val}"
-                                except asyncio.TimeoutError:
-                                    tool_output = "Error: Mobile device tool execution timed out (60s limit)."
-                                finally:
-                                    if req_id in MOBILE_CHANNELS:
-                                        del MOBILE_CHANNELS[req_id]
-                            else:
-                                tool_output = "Error: Active WebSocket is not available to route device command."
-                        elif name == "get_current_datetime":
-                            if client_time:
-                                tool_output = json.dumps({
-                                    "local_time_details": client_time,
-                                    "timezone": "Client Local Time"
-                                })
-                            else:
-                                tool_output = json.dumps({
-                                    "current_time": datetime.now().strftime("%I:%M:%S %p"),
-                                    "current_date": datetime.now().strftime("%A, %B %d, %Y"),
-                                    "timezone": "Server UTC Time",
-                                    "timestamp": datetime.now().isoformat()
-                                })
-                        elif name == "workspace_list_files":
-                            project_id = ensure_active_project(user_id, session_id, active_project_box)
-                            if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": "Listing active workspace files..."}))
-                            base_dir = os.path.join("projects", str(project_id))
-                            files_list = []
-                            if os.path.exists(base_dir):
-                                for root, _, files in os.walk(base_dir):
-                                    for f in files:
-                                        full_path = os.path.join(root, f)
-                                        rel_path = os.path.relpath(full_path, base_dir).replace("\\", "/")
-                                        files_list.append(rel_path)
-                            tool_output = json.dumps({"files": sorted(files_list)})
-
-                        elif name == "workspace_read_file":
-                            file_path = args.get("file_path", "")
-                            if not file_path:
-                                tool_output = "Error: file_path argument is required."
-                            else:
-                                project_id = ensure_active_project(user_id, session_id, active_project_box)
-                                if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Reading workspace file: {file_path}"}))
-                                base_dir = os.path.join("projects", str(project_id))
-                                try:
-                                    safe_path = get_safe_workspace_path(base_dir, file_path)
-                                    if os.path.exists(safe_path):
-                                        with open(safe_path, "r", encoding="utf-8") as f:
-                                            content = f.read()
-                                        tool_output = content
-                                    else:
-                                        tool_output = f"Error: File '{file_path}' does not exist in workspace."
-                                except Exception as e:
-                                    tool_output = f"Error: {str(e)}"
-
-                        elif name == "workspace_write_file":
-                            file_path = args.get("file_path", "")
-                            content = args.get("content", "")
-                            if not file_path:
-                                tool_output = "Error: file_path argument is required."
-                            else:
-                                project_id = ensure_active_project(user_id, session_id, active_project_box)
-                                if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Writing workspace file: {file_path}"}))
-                                base_dir = os.path.join("projects", str(project_id))
-                                try:
-                                    safe_path = get_safe_workspace_path(base_dir, file_path)
-                                    os.makedirs(os.path.dirname(safe_path), exist_ok=True)
-                                    with open(safe_path, "w", encoding="utf-8") as f:
-                                        f.write(content)
-                                    tool_output = f"Success: Wrote '{file_path}' ({len(content)} characters)."
-                                except Exception as e:
-                                    tool_output = f"Error: {str(e)}"
-
-                        elif name == "workspace_edit_file":
-                            file_path = args.get("file_path", "")
-                            search_content = args.get("search_content", "")
-                            replace_content = args.get("replace_content", "")
-                            if not file_path:
-                                tool_output = "Error: file_path argument is required."
-                            else:
-                                project_id = ensure_active_project(user_id, session_id, active_project_box)
-                                if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Editing workspace file: {file_path}"}))
-                                base_dir = os.path.join("projects", str(project_id))
-                                try:
-                                    safe_path = get_safe_workspace_path(base_dir, file_path)
-                                    if os.path.exists(safe_path):
-                                        with open(safe_path, "r", encoding="utf-8") as f:
-                                            existing_content = f.read()
-                                        if search_content not in existing_content:
-                                            tool_output = f"Error: The target search content was not found in '{file_path}'."
-                                        else:
-                                            new_content = existing_content.replace(search_content, replace_content)
-                                            with open(safe_path, "w", encoding="utf-8") as f:
-                                                f.write(new_content)
-                                            tool_output = f"Success: Replaced occurrences in '{file_path}'."
-                                    else:
-                                        tool_output = f"Error: File '{file_path}' does not exist in workspace."
-                                except Exception as e:
-                                    tool_output = f"Error: {str(e)}"
-
-                        elif name == "workspace_delete_file":
-                            file_path = args.get("file_path", "")
-                            if not file_path:
-                                tool_output = "Error: file_path argument is required."
-                            else:
-                                project_id = ensure_active_project(user_id, session_id, active_project_box)
-                                if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Deleting workspace file: {file_path}"}))
-                                base_dir = os.path.join("projects", str(project_id))
-                                try:
-                                    safe_path = get_safe_workspace_path(base_dir, file_path)
-                                    if os.path.exists(safe_path):
-                                        os.remove(safe_path)
-                                        tool_output = f"Success: Deleted '{file_path}'."
-                                    else:
-                                        tool_output = f"Error: File '{file_path}' does not exist in workspace."
-                                except Exception as e:
-                                    tool_output = f"Error: {str(e)}"
-
-                        elif name == "workspace_syntax_check":
-                            file_path = args.get("file_path", "")
-                            if not file_path:
-                                tool_output = "Error: file_path argument is required."
-                            else:
-                                project_id = ensure_active_project(user_id, session_id, active_project_box)
-                                if client_websocket: await client_websocket.send_text(json.dumps({"type": "hud_log", "content": f"Checking syntax of: {file_path}"}))
-                                base_dir = os.path.join("projects", str(project_id))
-                                try:
-                                    safe_path = get_safe_workspace_path(base_dir, file_path)
-                                    if not os.path.exists(safe_path):
-                                        tool_output = f"Error: File '{file_path}' does not exist."
-                                    else:
-                                        with open(safe_path, "r", encoding="utf-8") as f:
-                                            content = f.read()
-                                    
-                                        errors = []
-                                        if file_path.endswith(".html"):
-                                            from html.parser import HTMLParser
-                                            class SimpleHTMLValidator(HTMLParser):
-                                                def __init__(self):
-                                                    super().__init__()
-                                                    self.tags = []
-                                                    self.errors = []
-                                                def handle_starttag(self, tag, attrs):
-                                                    self_closing = {'img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'embed', 'param', 'col', 'area', 'track'}
-                                                    if tag not in self_closing:
-                                                        self.tags.append((tag, self.getpos()))
-                                                def handle_endtag(self, tag):
-                                                    self_closing = {'img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'embed', 'param', 'col', 'area', 'track'}
-                                                    if tag in self_closing:
-                                                        return
-                                                    if not self.tags:
-                                                        self.errors.append(f"Unexpected end tag </{tag}> on line {self.getpos()[0]}, col {self.getpos()[1]}")
-                                                    else:
-                                                        start_tag, pos = self.tags.pop()
-                                                        if start_tag != tag:
-                                                            self.errors.append(f"Mismatched tag: expected </{start_tag}> (opened line {pos[0]}), found </{tag}> on line {self.getpos()[0]}")
-                                        
-                                            parser = SimpleHTMLValidator()
-                                            try:
-                                                parser.feed(content)
-                                                if parser.tags:
-                                                    for tag, pos in parser.tags:
-                                                        parser.errors.append(f"Unclosed tag <{tag}> opened on line {pos[0]}, col {pos[1]}")
-                                                errors = parser.errors
-                                            except Exception as he:
-                                                errors.append(f"HTML Parser error: {str(he)}")
-                                    
-                                        elif file_path.endswith(".js"):
-                                            stack = []
-                                            mapping = {')': '(', '}': '{', ']': '['}
-                                            lines = content.splitlines()
-                                            for line_idx, line in enumerate(lines, 1):
-                                                clean_line = ""
-                                                in_string = False
-                                                string_char = None
-                                                skip_next = False
-                                                for idx, char in enumerate(line):
-                                                    if skip_next:
-                                                        skip_next = False
-                                                        continue
-                                                    if char == '\\' and in_string:
-                                                        skip_next = True
-                                                        continue
-                                                    if char in ('"', "'", '`'):
-                                                        if not in_string:
-                                                            in_string = True
-                                                            string_char = char
-                                                        elif string_char == char:
-                                                            in_string = False
-                                                    elif not in_string:
-                                                        if char == '/' and idx < len(line) - 1 and line[idx+1] == '/':
-                                                            break
-                                                        clean_line += char
-                                            
-                                                for char in clean_line:
-                                                    if char in mapping.values():
-                                                        stack.append((char, line_idx))
-                                                    elif char in mapping.keys():
-                                                        if not stack:
-                                                            errors.append(f"Mismatched closure: unexpected '{char}' on line {line_idx}")
-                                                            break
-                                                        else:
-                                                            top, start_line = stack.pop()
-                                                            if top != mapping[char]:
-                                                                errors.append(f"Mismatched brackets: '{char}' on line {line_idx} does not match '{top}' from line {start_line}")
-                                                                break
-                                            if stack:
-                                                for char, line_idx in stack:
-                                                    errors.append(f"Unclosed opening bracket '{char}' on line {line_idx}")
-
-                                        if errors:
-                                            tool_output = json.dumps({"status": "error", "errors": errors})
-                                        else:
-                                            tool_output = json.dumps({"status": "success", "message": f"Syntax check passed for '{file_path}'."})
-                                except Exception as e:
-                                    tool_output = f"Error performing syntax check: {str(e)}"
-                        else:
-                            tool_output = f"Error: Tool '{name}' is not supported."
-                    except Exception as e:
-                        tool_output = f"Error executing tool {name}: {str(e)}"
-
-
-                    if client_websocket:
-                        await client_websocket.send_text(json.dumps({
-                            "type": "tool_success",
-                            "node_id": tc_id
-                        }))
-                        short_res = str(tool_output)[:120] + '...' if len(str(tool_output)) > 120 else str(tool_output)
-                        await client_websocket.send_text(json.dumps({
-                            "type": "agent_thought",
-                            "content": f"Completed {name} successfully. Result: {short_res}"
-                        }))
-                    return (tc_id, tool_output, True)
-                except Exception as e:
-                    if client_websocket:
-                        await client_websocket.send_text(json.dumps({
-                            "type": "tool_failed",
-                            "node_id": tc_id
-                        }))
-                        await client_websocket.send_text(json.dumps({
-                            "type": "agent_thought",
-                            "content": f"Error in {name}: {str(e)}"
-                        }))
-                    return (tc_id, f'Error executing tool {name}: {str(e)}', False)
-
+            # execute_tool_call refactored globally to execute_tool_call_v2
             # Build workflow plan for client
             nodes_plan = []
             for tc in current_tool_calls:
@@ -1235,11 +1404,31 @@ async def _run_agentic_loop_impl(
                     break
 
                 # Execute ready tools in parallel
-                tasks = [execute_tool_call(tc) for tc in ready_tcs]
+                tool_context = {
+                    "web_search_called": web_search_called,
+                    "consulted_sources": consulted_sources,
+                    "document_id": document_id
+                }
+                tasks = [
+                    execute_tool_call_v2(
+                        tc=tc,
+                        user_id=user_id,
+                        session_id=session_id,
+                        active_project_box=active_project_box,
+                        client_websocket=client_websocket,
+                        manager_ref=manager_ref,
+                        client_time=client_time,
+                        model_key=model_key,
+                        tool_context=tool_context,
+                        bridge_mode=bridge_mode,
+                        mobile_local_ip=mobile_local_ip
+                    ) for tc in ready_tcs
+                ]
                 for tc in ready_tcs:
                     running_ids.add(tc["id"])
 
                 results = await asyncio.gather(*tasks)
+                web_search_called = tool_context['web_search_called']
 
                 for tc_id, out, success in results:
                     running_ids.remove(tc_id)

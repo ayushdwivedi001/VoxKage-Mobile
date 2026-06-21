@@ -166,6 +166,62 @@ async def handle_execute_command(websocket, cmd):
         except Exception:
             pass
 
+async def handle_execute_tool(websocket, data):
+    tool_name = data.get("tool_name")
+    args = data.get("args", {})
+    request_id = data.get("request_id")
+    
+    print(f"[*] Executing tool locally on laptop: {tool_name} with args {args}...")
+    
+    sys.path.append(os.path.join(os.path.dirname(__file__), "backend"))
+    
+    try:
+        if tool_name == "web_search":
+            from websearch_engine import web_search
+            res = await web_search(args.get("query", ""))
+            output = json.dumps(res)
+        elif tool_name == "web_fetch":
+            from websearch_engine import web_fetch
+            res = await web_fetch(args.get("url", ""))
+            output = json.dumps(res)
+        elif tool_name == "web_search_deep":
+            from websearch_engine import web_search_deep
+            res = await web_search_deep(args.get("query", ""))
+            output = json.dumps(res)
+        elif tool_name == "web_search_parallel":
+            from websearch_engine import web_search_parallel
+            res = await web_search_parallel(args.get("queries", []))
+            output = json.dumps(res)
+        elif tool_name == "web_fetch_parallel":
+            from websearch_engine import web_fetch_parallel
+            res = await web_fetch_parallel(args.get("urls", []))
+            output = json.dumps(res)
+        elif tool_name == "fetch_images_for_query":
+            from tool_executor import fetch_images_for_query
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, fetch_images_for_query, args.get("query", ""), args.get("limit", 5))
+            output = res
+        else:
+            output = f"Error: Tool {tool_name} not supported locally on laptop."
+            
+        await websocket.send(json.dumps({
+            "type": "tool_execution_result",
+            "request_id": request_id,
+            "output": output
+        }))
+        print(f"[+] Tool {tool_name} executed successfully.")
+    except Exception as e:
+        print(f"[-] Tool {tool_name} execution failed: {e}")
+        try:
+            await websocket.send(json.dumps({
+                "type": "tool_execution_result",
+                "request_id": request_id,
+                "error": str(e),
+                "output": f"Error: {str(e)}"
+            }))
+        except Exception:
+            pass
+
 async def bridge_loop(ws_url, token):
     url = f"{ws_url}/ws/laptop?token={token}"
     print(f"[*] Connecting WebSocket bridge to: {url}...")
@@ -187,6 +243,8 @@ async def bridge_loop(ws_url, token):
                 elif action == "execute":
                     cmd = data.get("command")
                     asyncio.create_task(handle_execute_command(websocket, cmd))
+                elif action == "execute_tool":
+                    asyncio.create_task(handle_execute_tool(websocket, data))
         except websockets.ConnectionClosed as cc:
             print(f"[-] Connection closed ({cc.code}): {cc.reason}. Reconnecting in 3s...")
             await asyncio.sleep(3)

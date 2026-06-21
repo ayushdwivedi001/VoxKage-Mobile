@@ -381,10 +381,9 @@ interface ImageWithLoaderProps {
 }
 
 function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress }: ImageWithLoaderProps) {
-  const [loading, setLoading] = useState(true);
+  const isBase64 = uri && uri.startsWith('data:image/');
+  const [loading, setLoading] = useState(!isBase64);
   const [error, setError] = useState(false);
-
-  const isBase64 = uri.startsWith('data:image/');
 
   let headers: Record<string, string> = {};
   if (uri && !isBase64) {
@@ -404,11 +403,11 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress }: Ima
       <View style={[styles.imageWrapper, style]}>
         {!error ? (
           <Image
-            source={{ uri, headers }}
+            source={isBase64 ? { uri } : { uri, headers }}
             style={[style, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}
             resizeMode={resizeMode}
-            onLoadStart={() => setLoading(true)}
-            onLoadEnd={() => setLoading(false)}
+            onLoadStart={isBase64 ? undefined : () => setLoading(true)}
+            onLoadEnd={isBase64 ? undefined : () => setLoading(false)}
             onError={() => {
               setError(true);
               setLoading(false);

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 import asyncio
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # --- Import Custom Backend Modules ---
 from auth import (
@@ -239,33 +239,65 @@ app.add_middleware(
 )
 
 # --- Active WebSocket Connections Registry ---
+from starlette.websockets import WebSocketState
+
+def is_websocket_connected(ws) -> bool:
+    try:
+        return ws is not None and ws.client_state == WebSocketState.CONNECTED and ws.application_state == WebSocketState.CONNECTED
+    except:
+        return False
+
 class ConnectionManager:
     def __init__(self):
         # Format: { email: List[WebSocket] }
-        self.active_chats: Dict[str, List[WebSocket]] = {}
+        self._active_chats: Dict[str, List[WebSocket]] = {}
         # Format: { email: WebSocket } (One active laptop connection per user)
-        self.active_laptops: Dict[str, WebSocket] = {}
+        self._active_laptops: Dict[str, WebSocket] = {}
+
+    @property
+    def active_chats(self) -> Dict[str, List[WebSocket]]:
+        cleaned = {}
+        for email, wss in list(self._active_chats.items()):
+            active_wss = [ws for ws in wss if is_websocket_connected(ws)]
+            if active_wss:
+                cleaned[email] = active_wss
+            else:
+                self._active_chats.pop(email, None)
+        return cleaned
+
+    @property
+    def active_laptops(self) -> Dict[str, WebSocket]:
+        cleaned = {}
+        for email, ws in list(self._active_laptops.items()):
+            if is_websocket_connected(ws):
+                cleaned[email] = ws
+            else:
+                self._active_laptops.pop(email, None)
+        return cleaned
 
     async def connect_chat(self, email: str, websocket: WebSocket):
         await websocket.accept()
-        if email not in self.active_chats:
-            self.active_chats[email] = []
-        self.active_chats[email].append(websocket)
+        if email not in self._active_chats:
+            self._active_chats[email] = []
+        self._active_chats[email].append(websocket)
 
     def disconnect_chat(self, email: str, websocket: WebSocket):
-        if email in self.active_chats:
-            self.active_chats[email].remove(websocket)
-            if not self.active_chats[email]:
-                del self.active_chats[email]
+        if email in self._active_chats:
+            try:
+                self._active_chats[email].remove(websocket)
+            except ValueError:
+                pass
+            if not self._active_chats[email]:
+                del self._active_chats[email]
 
     async def connect_laptop(self, email: str, websocket: WebSocket):
         await websocket.accept()
         # Overwrite existing laptop connection if reconnected
-        self.active_laptops[email] = websocket
+        self._active_laptops[email] = websocket
 
     def disconnect_laptop(self, email: str):
-        if email in self.active_laptops:
-            del self.active_laptops[email]
+        if email in self._active_laptops:
+            del self._active_laptops[email]
 
 manager = ConnectionManager()
 
@@ -321,6 +353,17 @@ class BtwMessage(BaseModel):
 
 class BtwRequest(BaseModel):
     messages: List[BtwMessage]
+    bridge_mode: Optional[str] = "laptop"
+    mobile_local_ip: Optional[str] = None
+
+
+class SwarmLaunchRequest(BaseModel):
+    query: str
+    session_id: str
+    model_key: str = "deepseek-flash"
+    bridge_mode: Optional[str] = "laptop"
+    mobile_local_ip: Optional[str] = None
+
 
 
 
@@ -416,21 +459,28 @@ def save_favorites(
     saved_favs = save_user_favorites(user, req.favorites)
     return {"favorite_models": saved_favs}
 
-async def query_llm_proxied(prompt: str, model_key: str = "deepseek-flash", history: list = None, user_id: str = None) -> str:
+async def query_llm_proxied(
+    prompt: str,
+    model_key: str = "deepseek-flash",
+    history: list = None,
+    user_id: str = None,
+    bridge_mode: str = "laptop",
+    mobile_local_ip: str = None
+) -> str:
     """
     Queries LLM. If user_id is provided and they have a connected laptop bridge or chat WebSocket,
     it proxies the completions query to bypass rate limits. Otherwise, it raises an error.
     """
     from opencode_proxy import query_opencode_proxy
     
-    # 1. Try to find a connected laptop daemon
+    # 1. Try to find a connected laptop daemon if in laptop bridge mode
     laptop_ws = None
-    if user_id and manager:
+    if bridge_mode == "laptop" and user_id and manager:
         laptop_ws = manager.active_laptops.get(user_id)
         
     # 2. Try to find a connected chat client (mobile app itself)
     client_ws = None
-    if not laptop_ws and user_id and manager:
+    if user_id and manager:
         chat_wss = manager.active_chats.get(user_id, [])
         if chat_wss:
             client_ws = chat_wss[0]
@@ -505,10 +555,108 @@ async def chat_btw(
         elif prompt.startswith("/btw"):
             prompt = prompt[4:]
             
-        response = await query_llm_proxied(prompt=prompt, model_key="deepseek-flash", history=history, user_id=user)
+        response = await query_llm_proxied(
+            prompt=prompt,
+            model_key="deepseek-flash",
+            history=history,
+            user_id=user,
+            bridge_mode=req.bridge_mode,
+            mobile_local_ip=req.mobile_local_ip
+        )
         return {"response": response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query side-channel: {str(e)}")
+
+
+@app.post("/chat/swarm/launch")
+async def launch_swarm(
+    req: SwarmLaunchRequest,
+    user: str = Depends(get_current_user)
+):
+    try:
+        import uuid
+        task_id = f"swarm-{uuid.uuid4()}"
+        
+        import re
+        agent_match = re.search(r"use\s+(\d+)\s+agents", req.query, re.IGNORECASE)
+        specified_agent_count = int(agent_match.group(1)) if agent_match else None
+        
+        clean_query = req.query
+        if clean_query.startswith("/agents "):
+            clean_query = clean_query[8:]
+        elif clean_query.startswith("/agents"):
+            clean_query = clean_query[7:]
+            
+        from swarm_manager import launch_swarm_background, ACTIVE_SWARM_TASKS
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(launch_swarm_background(
+            task_id=task_id,
+            query=clean_query,
+            user_id=user,
+            session_id=req.session_id,
+            model_key=req.model_key,
+            specified_agent_count=specified_agent_count,
+            bridge_mode=req.bridge_mode,
+            mobile_local_ip=req.mobile_local_ip
+        ))
+        ACTIVE_SWARM_TASKS[task_id] = task
+        
+        return {
+            "status": "success",
+            "task_id": task_id,
+            "active_swarm": {
+                "task_id": task_id,
+                "query": clean_query,
+                "status": "pending",
+                "subagents": [],
+                "final_result": None
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to launch swarm task: {str(e)}")
+
+
+@app.get("/chat/swarm/{session_id}/status")
+async def get_swarm_status(
+    session_id: str,
+    user: str = Depends(get_current_user)
+):
+    try:
+        from database import get_session
+        session_info = get_session(session_id, user)
+        active_swarm = session_info.get("active_swarm")
+        return {"active_swarm": active_swarm}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query swarm status: {str(e)}")
+
+
+@app.delete("/chat/swarm/{task_id}/cancel")
+async def cancel_swarm(
+    task_id: str,
+    user: str = Depends(get_current_user)
+):
+    try:
+        from swarm_manager import ACTIVE_SWARM_TASKS
+        from database import get_db, update_session_active_swarm
+        
+        # Reset active_swarm in session in database
+        try:
+            db = get_db()
+            res = db.table("sessions").select("id").eq("user_id", user).filter("active_swarm->>task_id", "eq", task_id).execute()
+            if res.data:
+                session_id = res.data[0]["id"]
+                update_session_active_swarm(session_id, user, None)
+        except Exception as db_err:
+            print(f"Error resetting active_swarm in DB on cancel: {db_err}")
+
+        task = ACTIVE_SWARM_TASKS.get(task_id)
+        if task and not task.done():
+            task.cancel()
+            del ACTIVE_SWARM_TASKS[task_id]
+            return {"status": "cancelled", "task_id": task_id}
+        return {"status": "cancelled", "task_id": task_id, "message": "Backend task was already done or not found, but DB status has been cleared."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to cancel swarm task: {str(e)}")
 
 
 
@@ -988,6 +1136,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
             variant = payload_data.get("variant", "High")
             document_id = payload_data.get("document_id", None)
             image_base64 = payload_data.get("image", None)
+            bridge_mode = payload_data.get("bridge_mode", "laptop")
+            mobile_local_ip = payload_data.get("mobile_local_ip", None)
 
             if not query:
                 continue
@@ -1029,7 +1179,13 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 )
                 
                 try:
-                    res_raw = await query_llm_proxied(prompt=system_instructions, model_key=model_key, user_id=user)
+                    res_raw = await query_llm_proxied(
+                        prompt=system_instructions,
+                        model_key=model_key,
+                        user_id=user,
+                        bridge_mode=bridge_mode,
+                        mobile_local_ip=mobile_local_ip
+                    )
                     import re
                     clean_res = res_raw.strip()
                     if clean_res.startswith("```"):
@@ -1196,7 +1352,9 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 client_websocket=websocket,
                 variant=variant,
                 document_id=document_id,
-                image_base64=image_base64
+                image_base64=image_base64,
+                bridge_mode=bridge_mode,
+                mobile_local_ip=mobile_local_ip
             )
             
             async for chunk_sse in async_generator:
@@ -1329,6 +1487,11 @@ async def websocket_laptop_endpoint(websocket: WebSocket, token: str = Query(...
                 # Check if it's a command execution response
                 if payload_data.get("type") == "execution_result":
                     future = LAPTOP_CHANNELS.get(user)
+                    if future and not future.done():
+                        future.set_result(payload_data)
+                elif payload_data.get("type") == "tool_execution_result":
+                    request_id = payload_data.get("request_id")
+                    future = LAPTOP_CHANNELS.get(request_id)
                     if future and not future.done():
                         future.set_result(payload_data)
                         

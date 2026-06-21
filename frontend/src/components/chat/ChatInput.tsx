@@ -11,8 +11,8 @@ const renderHighlightedText = (text: string) => {
     const cmd = spaceIdx !== -1 ? text.substring(0, spaceIdx) : text;
     const rest = spaceIdx !== -1 ? text.substring(spaceIdx) : '';
     
-    const isKnownCmd = ['/btw', '/drill', '/compact'].includes(cmd.toLowerCase()) ||
-                        ['/btw', '/drill', '/compact'].some(c => c.startsWith(cmd.toLowerCase()));
+    const isKnownCmd = ['/btw', '/drill', '/compact', '/agents'].includes(cmd.toLowerCase()) ||
+                        ['/btw', '/drill', '/compact', '/agents'].some(c => c.startsWith(cmd.toLowerCase()));
                         
     if (isKnownCmd) {
       return (

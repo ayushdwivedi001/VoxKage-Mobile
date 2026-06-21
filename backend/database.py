@@ -60,6 +60,13 @@ def delete_session(session_id: str, user_id: str) -> dict:
     res = db.table("sessions").delete().eq("id", session_id).eq("user_id", user_id).execute()
     return {"status": "success", "deleted_session_id": session_id}
 
+def update_session_active_swarm(session_id: str, user_id: str, active_swarm: dict | None) -> dict:
+    db = get_db()
+    res = db.table("sessions").update({"active_swarm": active_swarm}).eq("id", session_id).eq("user_id", user_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Session not found or swarm update failed.")
+    return res.data[0]
+
 # --- Messages Management ---
 def log_message(session_id: str, role: str, content: str) -> dict:
     db = get_db()
