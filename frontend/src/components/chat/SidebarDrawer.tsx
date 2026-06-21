@@ -30,6 +30,8 @@ interface SidebarDrawerProps {
   handleLogout: () => void;
   email: string | null;
   onPlaygroundPress: () => void;
+  onSettingsPress: () => void;
+  honorific: string;
 }
 
 export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
@@ -51,6 +53,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   handleLogout,
   email,
   onPlaygroundPress,
+  onSettingsPress,
+  honorific,
 }) => {
   const [searchQuery, setSearchQuery] = React.useState('');
   const insets = useSafeAreaInsets();
@@ -203,13 +207,13 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
           <View style={styles.userSection}>
             <Ionicons name="person-circle-outline" size={32} color="#3b82f6" />
             <View style={styles.userInfo}>
-              <Text style={styles.userHonorific}>Sir</Text>
+              <Text style={styles.userHonorific}>{honorific}</Text>
               <Text style={styles.userEmail} numberOfLines={1}>
                 {email || 'sir@voxkage.ai'}
               </Text>
             </View>
             <TouchableOpacity
-              onPress={() => setShowSidebarSettings(!showSidebarSettings)}
+              onPress={onSettingsPress}
               style={styles.settingsIconBtn}
             >
               <Ionicons name="settings-outline" size={18} color="#9ca3af" />

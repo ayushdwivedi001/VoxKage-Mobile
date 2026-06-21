@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text } from 'react-native';
 import { LogoV } from './LogoV';
 import { styles } from './styles';
+import { replaceSir } from '@/utils/settings';
 
 const GREETINGS = [
   "How can I help you today, Sir?",
@@ -23,7 +24,7 @@ export const WelcomeGreeting: React.FC = () => {
   return (
     <View style={styles.welcomeContainer}>
       <LogoV size={72} />
-      <Text style={styles.welcomeText}>{greeting}</Text>
+      <Text style={styles.welcomeText}>{replaceSir(greeting)}</Text>
     </View>
   );
 };

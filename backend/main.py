@@ -16,7 +16,8 @@ from database import (
     create_session, list_sessions, get_session, update_session_name, delete_session,
     log_message, get_session_messages, save_playground_project, list_projects, get_project,
     delete_playground_project, get_user_favorites, save_user_favorites,
-    get_user_drill_session, save_user_drill_session
+    get_user_drill_session, save_user_drill_session,
+    clear_user_sessions, clear_user_playground_projects, get_user_settings_profile, save_user_settings_profile
 )
 from file_handler import save_upload, delete_file, UPLOAD_DIR
 from rag_engine import index_file_in_rag
@@ -345,6 +346,8 @@ class SaveProjectRequest(BaseModel):
 class SaveFavoritesRequest(BaseModel):
     favorites: List[str]
 
+class SaveSettingsProfileRequest(BaseModel):
+    settings_profile: dict
 
 class BtwMessage(BaseModel):
     role: str
@@ -458,6 +461,26 @@ def save_favorites(
 ):
     saved_favs = save_user_favorites(user, req.favorites)
     return {"favorite_models": saved_favs}
+
+@app.get("/user/settings-profile")
+def get_settings_profile(user: str = Depends(get_current_user)):
+    return {"settings_profile": get_user_settings_profile(user)}
+
+@app.post("/user/settings-profile")
+def save_settings_profile(
+    req: SaveSettingsProfileRequest,
+    user: str = Depends(get_current_user)
+):
+    saved_profile = save_user_settings_profile(user, req.settings_profile)
+    return {"settings_profile": saved_profile}
+
+@app.delete("/sessions")
+def clear_sessions(user: str = Depends(get_current_user)):
+    return clear_user_sessions(user)
+
+@app.delete("/projects")
+def clear_projects(user: str = Depends(get_current_user)):
+    return clear_user_playground_projects(user)
 
 async def query_llm_proxied(
     prompt: str,

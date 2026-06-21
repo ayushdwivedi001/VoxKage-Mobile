@@ -38,3 +38,12 @@ backend/test_*.py
 
 # Scratch files
 scratch/
+
+# Personal discussion / notes
+discussion.txt
+
+# AI CLI config
+.claude/
+
+# Runtime data uploads
+backend/data/

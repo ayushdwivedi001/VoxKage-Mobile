@@ -5,6 +5,8 @@ const BACKEND_URL_KEY = 'voxkage_backend_url';
 const TOKEN_KEY = 'voxkage_token';
 const EMAIL_KEY = 'voxkage_email';
 const FAVORITES_KEY = 'voxkage_favorite_models';
+const SETTINGS_PROFILE_KEY = 'voxkage_settings_profile';
+const OPENCODE_API_KEY_KEY = 'voxkage_opencode_api_key';
 
 export const DEFAULT_BACKEND_URL = 'https://shinayush-voxkage-mobile-backend.hf.space';
 
@@ -239,6 +241,66 @@ export const storage = {
     } catch (e) {
       console.error('Error saving mobile local IP', e);
     }
+  },
+
+  async getSettingsProfile(): Promise<SettingsProfile | null> {
+    try {
+      let data = '';
+      if (Platform.OS === 'web') {
+        data = localStorage.getItem(SETTINGS_PROFILE_KEY) || '';
+      } else {
+        data = await SecureStore.getItemAsync(SETTINGS_PROFILE_KEY) || '';
+      }
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async setSettingsProfile(profile: SettingsProfile): Promise<void> {
+    try {
+      const data = JSON.stringify(profile);
+      if (Platform.OS === 'web') {
+        localStorage.setItem(SETTINGS_PROFILE_KEY, data);
+      } else {
+        await SecureStore.setItemAsync(SETTINGS_PROFILE_KEY, data);
+      }
+    } catch (e) {
+      console.error('Error saving settings profile', e);
+    }
+  },
+
+  async getOpenCodeApiKey(): Promise<string | null> {
+    try {
+      if (Platform.OS === 'web') {
+        return localStorage.getItem(OPENCODE_API_KEY_KEY);
+      } else {
+        return await SecureStore.getItemAsync(OPENCODE_API_KEY_KEY);
+      }
+    } catch {
+      return null;
+    }
+  },
+
+  async setOpenCodeApiKey(key: string): Promise<void> {
+    try {
+      if (Platform.OS === 'web') {
+        localStorage.setItem(OPENCODE_API_KEY_KEY, key);
+      } else {
+        await SecureStore.setItemAsync(OPENCODE_API_KEY_KEY, key);
+      }
+    } catch (e) {
+      console.error('Error saving OpenCode API key', e);
+    }
   }
 };
+
+export interface SettingsProfile {
+  honorific: 'Sir' | 'Mam' | 'Boss' | 'Comrade' | 'Commander' | 'Agent' | 'Custom' | 'None';
+  custom_honorific?: string;
+  user_name?: string;
+  personality_tone: 'Polite' | 'Casual' | 'Stern' | 'Judgy' | 'Companion';
+  custom_profile_data?: string;
+}
+
 

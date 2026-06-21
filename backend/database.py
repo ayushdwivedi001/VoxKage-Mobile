@@ -183,4 +183,33 @@ def save_user_drill_session(user_id: str, drill_state: dict | None) -> dict | No
         raise HTTPException(status_code=500, detail="Failed to save active drill session.")
     return res.data[0].get("active_drill")
 
+def clear_user_sessions(user_id: str) -> dict:
+    db = get_db()
+    db.table("sessions").delete().eq("user_id", user_id).execute()
+    return {"status": "success", "message": "All sessions deleted."}
+
+def clear_user_playground_projects(user_id: str) -> dict:
+    db = get_db()
+    db.table("projects").delete().eq("user_id", user_id).execute()
+    return {"status": "success", "message": "All playground mini apps deleted."}
+
+def get_user_settings_profile(user_id: str) -> dict:
+    db = get_db()
+    res = db.table("user_settings").select("settings_profile").eq("user_id", user_id).execute()
+    if not res.data:
+        return {}
+    return res.data[0].get("settings_profile") or {}
+
+def save_user_settings_profile(user_id: str, profile: dict) -> dict:
+    db = get_db()
+    data = {
+        "user_id": user_id,
+        "settings_profile": profile,
+        "updated_at": "now()"
+    }
+    res = db.table("user_settings").upsert(data).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Failed to save user settings profile.")
+    return res.data[0].get("settings_profile") or {}
+
 

@@ -1183,8 +1183,60 @@ async def _run_agentic_loop_impl(
     else:
         current_time_str = datetime.now().strftime("%A, %B %d, %Y, %I:%M:%S %p")
 
+    # Load user settings profile
+    settings_profile = {}
+    try:
+        from database import get_user_settings_profile
+        settings_profile = get_user_settings_profile(user_id)
+    except Exception as e:
+        print(f"[-] Error loading settings profile in agent_loop: {e}")
+
+    # Determine honorific
+    h_opt = settings_profile.get("honorific", "Sir")
+    h_custom = settings_profile.get("custom_honorific", "")
+    h_name = settings_profile.get("user_name", "")
+    
+    if h_opt == "None":
+        honorific = h_name if h_name else "User"
+    elif h_opt == "Custom" and h_custom:
+        honorific = h_custom
+    else:
+        honorific = h_opt if h_opt else "Sir"
+
+    # Tone Profile dynamic instructions
+    tone_opt = settings_profile.get("personality_tone", "Polite")
+    tone_instructions = ""
+    if tone_opt == "Casual":
+        tone_instructions = (
+            "Tone/Persona: Friendly, warm, casual, and conversational. Drop the overly formal tone. "
+            "Use emojis occasionally. Speak as a close partner/collaborator."
+        )
+    elif tone_opt == "Stern":
+        tone_instructions = (
+            "Tone/Persona: Stern, direct, highly concise, and task-focused. Explain nothing unless asked. "
+            "Zero pleasantries. Straight to the code, results, and facts."
+        )
+    elif tone_opt == "Judgy":
+        tone_instructions = (
+            "Tone/Persona: Sarcastic, dry, cynical, and judgy. Banter with high-IQ banter. "
+            "Humorously critique any inefficient code, formatting, or silly questions, but remain helpful."
+        )
+    elif tone_opt == "Companion":
+        tone_instructions = (
+            "Tone/Persona: Highly empathetic, self-aware companion. Show supportive, thoughtful, "
+            "and emotionally intelligent responses, acting as a true cognitive partner."
+        )
+    else:  # Polite (Jarvis Default)
+        tone_instructions = (
+            "Tone/Persona: Witty, dry, professional, and slightly deadpan. Helpful, proactive, and sharp."
+        )
+
+    custom_profile_data = settings_profile.get("custom_profile_data", "")
+
     # System instructions (Static instructions placed first to optimize prompt caching prefix hits)
+    # Dynamically replace "sir"/"Sir" in the base prompt to adapt to honorific selection
     system_prompt = BASE_SYSTEM_PROMPT
+    system_prompt = system_prompt.replace("sir", honorific.lower()).replace("Sir", honorific)
 
     if active_project:
         files_list_str = ""
@@ -1229,9 +1281,14 @@ async def _run_agentic_loop_impl(
         else:
             document_context_str += "(No text content could be retrieved from the document vectors, Sir.)\n\n"
 
+    personalization_str = f"Preferred Honorific: {honorific}\n{tone_instructions}\n"
+    if custom_profile_data:
+        personalization_str += f"User Curated Profile Memory:\n{custom_profile_data}\n"
+
     system_prompt += (
         f"\n\n--- DYNAMIC SESSION CONTEXT ---\n"
         f"The current local date and time is {current_time_str}. Use this exact timestamp when answering any queries about the date, time, day, or year. Never guess or hallucinate the time.\n"
+        f"--- USER PERSONALIZATION & MEMORY ---\n{personalization_str}"
         f"--- USER SOUL PROFILE MEMORIES ---\n{soul_context}\n\n"
     )
     if document_context_str:

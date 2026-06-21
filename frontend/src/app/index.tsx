@@ -24,6 +24,8 @@ import { SidebarDrawer } from '@/components/chat/SidebarDrawer';
 import { PlaygroundDrawer } from '@/components/chat/PlaygroundDrawer';
 import { registerBackgroundTasks } from '@/utils/backgroundWorker';
 import { VoiceWaveVisualizer } from '@/components/chat/VoiceWaveVisualizer';
+import { SettingsModal } from '@/components/chat/SettingsModal';
+import { settingsManager, replaceSir } from '@/utils/settings';
 
 // Modular Sub-Components
 import { FluidBackground } from '@/components/chat/FluidBackground';
@@ -145,6 +147,8 @@ export default function ChatScreen() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isPlaygroundOpen, setIsPlaygroundOpen] = useState(false);
   const [showSidebarSettings, setShowSidebarSettings] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [honorific, setHonorific] = useState('Sir');
   const [showCommandPopup, setShowCommandPopup] = useState(false);
   const [commandPopupActiveIndex, setCommandPopupActiveIndex] = useState(0);
 
@@ -522,6 +526,19 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
+    const initSettings = async () => {
+      await settingsManager.initialize();
+      setHonorific(settingsManager.getHonorific());
+    };
+    initSettings();
+
+    const unsubscribe = settingsManager.subscribe(() => {
+      setHonorific(settingsManager.getHonorific());
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -773,7 +790,7 @@ export default function ChatScreen() {
         <View style={styles.voiceOverlay}>
           <Text style={styles.voiceTitle}>Listening...</Text>
           <VoiceWaveVisualizer active={voiceLoop.isVoiceActive} volume={voiceLoop.micVolume} />
-          <Text style={styles.voiceSubtitle}>Speak your instruction, Sir</Text>
+          <Text style={styles.voiceSubtitle}>{replaceSir('Speak your instruction, Sir')}</Text>
         </View>
       )}
 
@@ -801,6 +818,11 @@ export default function ChatScreen() {
           playground.setPlaygroundView('list');
           openPlayground();
         }}
+        onSettingsPress={() => {
+          closeSidebar();
+          setShowSettingsModal(true);
+        }}
+        honorific={honorific}
       />
 
       {/* Code Playground Drawer */}
@@ -856,6 +878,17 @@ export default function ChatScreen() {
         visible={isSourcesDrawerOpen}
         onClose={() => setIsSourcesDrawerOpen(false)}
         sources={activeSources}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        visible={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        email={email}
+        onLogout={handleLogout}
+        models={models}
+        activeModel={activeModel}
+        setActiveModel={setActiveModel}
       />
     </View>
   );
