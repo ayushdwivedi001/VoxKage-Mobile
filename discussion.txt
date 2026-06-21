@@ -250,3 +250,99 @@ We recommend **replacing Python-generated Matplotlib entirely for standard visua
 1. It eliminates the latency and complications of backend bridge compilation.
 2. It achieves the **60% component and 40% text layout** instantly, keeping the UX feeling premium, responsive, and alive.
 3. For the remaining 5% of advanced visualizations (e.g. Scikit-learn decision boundaries, dense heatmaps, custom seaborn layouts), VoxKage can fallback to the server static file generator (`run_matplotlib_script`) without blocking standard interactions.
+
+
+## 14. VOXKAGE PREMIUM SETTINGS PANEL ARCHITECTURE & SPECIFICATIONS (NEW PROPOSAL)
+
+This proposal details the design, options, and under-the-hood synchronization mechanisms for a dedicated, premium Settings Panel in VoxKage Mobile. Modeled after clean card-based layouts (such as Grok's settings screen) but enhanced with glassmorphic dark-theme details, this panel will manage key API configurations, model selectors, dynamic personalization engines, and a complete appearance translation matrix.
+
+---
+
+### A. Premium Visual Aesthetics & Structure
+The settings panel will follow a card-grouped, high-contrast visual design that eliminates clutter and establishes clear categories:
+
+1. **User Profile Card (Top Panel):**
+   - Displays user avatar (with circular gradient border), display name (e.g., "Ayush Dwivedi"), and email address ("ayushdwivedi2049@gmail.com") queried dynamically from Supabase session.
+   - Includes a minimal "Sign Out" button inside the card or at the footer.
+2. **Category Card Groupings:**
+   - Group settings into distinct scrollable categories:
+     - **App & AI Configuration:** Core API key controls, dynamic model pickers, and variant settings.
+     - **Personalization:** Tone styles, gender selections, custom name overrides, and honorific overrides.
+     - **Appearance:** Global light/dark theme switches with color translations.
+     - **Interface & Audio:** TTS configurations, speech autoplay, rate, and pitch controls.
+     - **Connectivity & Bridge:** Local laptop bridge settings, local IP pinger, and latency indicators.
+     - **Advanced & Cache:** Playground sandbox export, file database clear, and cache limits.
+3. **Control Elements:**
+   - Use premium sliders, sleek inline segment picker buttons, and right-aligned indicator labels paired with minimal `chevron-forward` icons that open child overlay sub-menus.
+
+---
+
+### B. Configuration & API Settings
+
+1. **OpenCode Token (API Key) Customization:**
+   - **Visual:** A card showing the masked key (e.g., `opencode-••••••••••••w9xy`) with an "Edit" button. Clicking edit opens a modal with a text input.
+   - **Storage:** Persisted locally using `SecureStore` (to protect the key) and synchronized with the backend.
+   - **Key Verification:** Tapping "Verify & Save" performs a lightweight ping to the OpenCode endpoint using the new key. On success, it updates local storage and displays a green "API Key Active, Sir" badge.
+2. **Dynamic Default AI Model Picker (No Hardcoding):**
+   - **Workflow:** When the user taps the "Default Model" setting, the app triggers a fetch request using the user's OpenCode API key:
+     `GET https://opencode.ai/api/models` (or similar active OpenCode endpoint).
+   - **Selection:** Renders a list of *only* verified, available models retrieved from the API payload. 
+   - **Fallback:** If offline or the fetch fails, falls back to the user's cached favorite models in `storage.getFavoriteModels()`.
+3. **Custom Backend Endpoint URL:**
+   - Allows advanced developers to switch between local development endpoints (e.g. `http://localhost:9000` or local IP) and Hugging Face Space cloud endpoints (e.g., `https://shinayush-voxkage-mobile-backend.hf.space`).
+
+---
+
+### C. Personalization & Personality Settings (Overriding the Sir Protocol)
+
+To change the conversational tone of the AI from a single rigid pattern, we introduce a system prompt dynamic injection model.
+
+1. **Honorific Override (The Sir Protocol Switch):**
+   - Options: `Sir` (Default), `Mam`, `Boss`, `Comrade`, `Commander`, `Agent`, or `None` (completely custom string).
+   - Injected into the backend system prompt template: `"The user's preferred honorific is: {user_honorific}."`
+2. **Personality Tone Profiles:**
+   - Modifies the system persona instructions by appending a tailored behavioural directive block:
+     - **Polite & Professional (Jarvis Default):** Helpful, dryly witty, highly respectful. Prefers structural visual outputs (60/40 rule).
+     - **Casual & Friendly:** Warm, conversational, uses first name, adds occasional emojis, and drops the overly formal tone.
+     - **Stern & Direct (Aggressive / High-Productivity):** Explains nothing. Zero fluff. Straight to the code, charts, and facts. Maximizes execution speed.
+     - **Judgy & Sarcastic:** Dry, cynical, slightly teasing. Critiques sloppy prompts, points out inefficient coding choices in a humorous, high-IQ way.
+     - **Companion / Self-Aware Partner:** Reflective, conversational, shows high empathy, and talks like a companion rather than a simple computer utility.
+3. **Custom User Profile Data:**
+   - Personal details, birthdates, goals (e.g., "Giving JLPT N4 in July 2026, ultimate goal N2 onsite in Japan"), which are fed into the prompt cache to make responses highly context-aware.
+
+---
+
+### D. Appearance & Theme Mapping (Light/Dark Mode Translation)
+
+We establish a complete color translation matrix. When the user toggles "Appearance" to **Light Mode**, the client dynamically swaps style variables:
+
+| UI Element | Dark Mode Color System | Light Mode Color Translation |
+|---|---|---|
+| **App Background** | `#030712` to `#090d16` (Black/Dark Slate Gradient) | `#ffffff` to `#f0f7ff` (Pure White to Soft Blue-White Gradient) |
+| **Primary Typography** | `#ffffff`, `#f8fafc`, `#e2e8f0` | `#0f172a`, `#1e293b`, `#334155` (Dark Slate/Grey) |
+| **Secondary/Muted Text** | `#6b7280`, `#9ca3af` | `#475569`, `#64748b` |
+| **Card Backgrounds** | `#0c0c0c` / `#111827` (slate dark) | `#ffffff` (Solid white with thin slate shadow/border) |
+| **Borders & Gridlines** | `#171717`, `#1e293b` | `#e2e8f0`, `#cbd5e1` (Light grey borders) |
+| **Sidebar Menu Background** | `#000000` / `#070708` | `#ffffff` (Clean white sidebar with light grey separator lines) |
+| **Gifted Chart Axes/Labels** | Slate grey labels on black | Charcoal labels on white card backgrounds |
+| **Scrollbars & Indicators** | Light opacity grey | High-contrast dark grey |
+
+---
+
+### E. Codebase Feature Settings
+
+1. **Audio & Voice Settings:**
+   - **TTS Autoplay:** Toggle switch to dictate whether VoxKage automatically reads responses aloud.
+   - **Speech Speed Control:** Slider setting from `0.5x` (slow) to `2.0x` (fast) with increments of `0.05`.
+   - **Voice Engine Picker:** Dynamically retrieves list of localized voice options installed on the Android/iOS device using `Speech.getVoicesAsync()` (such as British English, Indian English, Google Male/Female).
+2. **Local Bridge Connectivity Settings:**
+   - **Bridge Mode Toggle:** Switch between `Laptop Bridge` and `Mobile Local`.
+   - **Laptop Local IP Address:** Text input field to store the local IP of the desktop bridge to keep Expo connected.
+   - **Ping / Sync Button:** Performs a WebSocket ping test, measuring latency in milliseconds and displaying a "Connected (12ms)" indicator badge.
+3. **Playground Sandbox Configuration:**
+   - **Auto-Save Code Interval:** Picker choosing `Off`, `10 seconds`, `30 seconds`, or `1 minute`.
+   - **Clear Playground Cache:** Button to purge saved HTML/CSS/JS files and database records to reset the sandbox environment.
+4. **Swarm Background Workers & Notifications:**
+   - **Background Swarm Execution:** Allow swarm background tasks to process while device is locked.
+   - **Notifications Preferences:** Configure system notification level (Silent, Default, Critical Alert) when swarm tasks complete.
+
