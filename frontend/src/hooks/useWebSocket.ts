@@ -84,13 +84,136 @@ export function useWebSocket(
   const activeEditingProjectIdRef = useRef<string | null>(null);
   const projectsRef = useRef<any[]>([]);
 
-  useEffect(() => {
-    activeEditingProjectIdRef.current = activeEditingProjectId;
-  }, [activeEditingProjectId]);
+  // Pacing streaming buffer & state refs
+  const rawStreamingBufferRef = useRef('');
+  const displayedStreamingTextRef = useRef('');
+  const pacingIntervalRef = useRef<any>(null);
+  const isDoneReceivedRef = useRef(false);
+  const pendingDoneDataRef = useRef<any>(null);
 
   useEffect(() => {
-    projectsRef.current = projects;
-  }, [projects]);
+    return () => {
+      if (pacingIntervalRef.current) {
+        clearInterval(pacingIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const resetPacingRefs = () => {
+    if (pacingIntervalRef.current) {
+      clearInterval(pacingIntervalRef.current);
+      pacingIntervalRef.current = null;
+    }
+    rawStreamingBufferRef.current = '';
+    displayedStreamingTextRef.current = '';
+    isDoneReceivedRef.current = false;
+    pendingDoneDataRef.current = null;
+  };
+
+  const handleDoneExecution = async () => {
+    sessionRef.current.setCompactionProgress(null);
+    const associatedProjectId = pendingDoneDataRef.current?.project_id || null;
+    const currText = displayedStreamingTextRef.current;
+
+    // Clear streaming text state
+    setStreamingText('');
+    streamingTextRef.current = '';
+    displayedStreamingTextRef.current = '';
+    rawStreamingBufferRef.current = '';
+    isDoneReceivedRef.current = false;
+    pendingDoneDataRef.current = null;
+
+    if (currText.trim()) {
+      const assistantMessageId = generateRandomId('assistant');
+      const editingId = associatedProjectId || activeEditingProjectIdRef.current;
+
+      if (editingId) {
+        setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
+      }
+
+      // Check if there is playground code in the response
+      const htmlMatch = currText.match(/```html\n([\s\S]*?)```/i);
+      const cssMatch = currText.match(/```css\n([\s\S]*?)```/i);
+      const jsMatch =
+        currText.match(/```javascript\n([\s\S]*?)```/i) ||
+        currText.match(/```js\n([\s\S]*?)```/i);
+      const hasPlaygroundCode = htmlMatch || cssMatch || jsMatch;
+
+      setMessages((prev) => {
+        const updated = [
+          ...prev,
+          { id: assistantMessageId, role: 'assistant' as const, content: currText },
+        ];
+        scanMessagesForPlayground(updated);
+        return updated;
+      });
+
+      if (editingId && hasPlaygroundCode) {
+        const htmlCode = htmlMatch ? htmlMatch[1] : '';
+        const cssCode = cssMatch ? cssMatch[1] : '';
+        const jsCode = jsMatch ? jsMatch[1] : '';
+
+        const originalProj = projectsRef.current.find((p) => p.id === editingId);
+        if (originalProj) {
+          const finalHtml = htmlCode || originalProj.html || '';
+          const finalCss = cssCode || originalProj.css || '';
+          const finalJs = jsCode || originalProj.js || '';
+
+          setPlaygroundHtml(finalHtml);
+          setPlaygroundCss(finalCss);
+          setPlaygroundJs(finalJs);
+          setPlaygroundRevision((prev) => prev + 1);
+
+          if (handleSaveProjectRef.current) {
+            await handleSaveProjectRef.current(
+              originalProj.name,
+              finalHtml,
+              finalCss,
+              finalJs,
+              editingId
+            );
+          }
+        }
+      }
+    }
+    if (associatedProjectId) {
+      await loadProjectsRef.current?.(backendUrl, token || '');
+    }
+    setLoading(false);
+    setThinkingStatus(null);
+  };
+
+  const startPacingLoop = () => {
+    if (pacingIntervalRef.current) return;
+
+    pacingIntervalRef.current = setInterval(() => {
+      const buffer = rawStreamingBufferRef.current;
+      const displayed = displayedStreamingTextRef.current;
+
+      if (displayed.length < buffer.length) {
+        const diff = buffer.length - displayed.length;
+        let charsToAppend = 1;
+        if (diff > 250) {
+          charsToAppend = 16;
+        } else if (diff > 120) {
+          charsToAppend = 8;
+        } else if (diff > 50) {
+          charsToAppend = 4;
+        } else if (diff > 15) {
+          charsToAppend = 2;
+        }
+
+        const nextText = displayed + buffer.substring(displayed.length, displayed.length + charsToAppend);
+        displayedStreamingTextRef.current = nextText;
+        setStreamingText(nextText);
+        streamingTextRef.current = nextText;
+      } else if (isDoneReceivedRef.current) {
+        clearInterval(pacingIntervalRef.current);
+        pacingIntervalRef.current = null;
+        handleDoneExecution();
+      }
+    }, 18);
+  };
 
   const updateStreamingText = (text: string | ((prev: string) => string)) => {
     setStreamingText((prev) => {
@@ -132,6 +255,7 @@ export function useWebSocket(
 
   const connectWebSocket = (sessionId: string, jwtToken: string, url: string) => {
     if (wsRef.current) wsRef.current.close();
+    resetPacingRefs();
 
     const wsScheme = url.startsWith('https') ? 'wss' : 'ws';
     const cleanBaseUrl = url.replace(/^(https?:\/\/)/, '').replace(/\/$/, '');
@@ -155,7 +279,8 @@ export function useWebSocket(
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'token') {
-          updateStreamingText((prev) => prev + data.content);
+          rawStreamingBufferRef.current += data.content;
+          startPacingLoop();
         } else if (data.type === 'context_sync') {
           sessionRef.current.setContextPercent(data.percent);
         } else if (data.type === 'compaction_progress') {
@@ -281,6 +406,7 @@ export function useWebSocket(
           runMobileTool();
         } else if (data.type === 'error') {
           sessionRef.current.setCompactionProgress(null);
+          resetPacingRefs();
           let errorMsg = data.content;
           if (errorMsg && errorMsg.includes('Upstream error:')) {
             try {
@@ -346,68 +472,9 @@ export function useWebSocket(
           setConfirmationToolLabel(data.label || data.tool_name);
           setConfirmationRequestId(data.request_id);
         } else if (data.type === 'done') {
-          sessionRef.current.setCompactionProgress(null);
-          const associatedProjectId = data.project_id || null;
-          const currText = streamingTextRef.current;
-          updateStreamingText('');
-
-          if (currText.trim()) {
-            const assistantMessageId = generateRandomId('assistant');
-            const editingId = associatedProjectId || activeEditingProjectIdRef.current;
-
-            if (editingId) {
-              setMessageProjectIds((prevMap) => ({ ...prevMap, [assistantMessageId]: editingId }));
-            }
-
-            setMessages((prev) => {
-              const updated = [
-                ...prev,
-                { id: assistantMessageId, role: 'assistant' as const, content: currText },
-              ];
-              scanMessagesForPlayground(updated);
-
-              if (editingId) {
-                const htmlMatch = currText.match(/```html\n([\s\S]*?)```/i);
-                const cssMatch = currText.match(/```css\n([\s\S]*?)```/i);
-                const jsMatch =
-                  currText.match(/```javascript\n([\s\S]*?)```/i) ||
-                  currText.match(/```js\n([\s\S]*?)```/i);
-
-                if (htmlMatch || cssMatch || jsMatch) {
-                  const htmlCode = htmlMatch ? htmlMatch[1] : '';
-                  const cssCode = cssMatch ? cssMatch[1] : '';
-                  const jsCode = jsMatch ? jsMatch[1] : '';
-
-                  const originalProj = projectsRef.current.find((p) => p.id === editingId);
-                  if (originalProj) {
-                    const finalHtml = htmlCode || originalProj.html || '';
-                    const finalCss = cssCode || originalProj.css || '';
-                    const finalJs = jsCode || originalProj.js || '';
-
-                    setPlaygroundHtml(finalHtml);
-                    setPlaygroundCss(finalCss);
-                    setPlaygroundJs(finalJs);
-                    setPlaygroundRevision((prev) => prev + 1);
-
-                    handleSaveProjectRef.current?.(
-                      originalProj.name,
-                      finalHtml,
-                      finalCss,
-                      finalJs,
-                      editingId
-                    );
-                  }
-                }
-              }
-
-              return updated;
-            });
-          }
-          if (associatedProjectId) {
-            loadProjectsRef.current?.(backendUrl, token || '');
-          }
-          setLoading(false);
-          setThinkingStatus(null);
+          pendingDoneDataRef.current = data;
+          isDoneReceivedRef.current = true;
+          startPacingLoop();
         }
       } catch (e) {
         console.error('Socket message parse error', e);
@@ -421,7 +488,8 @@ export function useWebSocket(
       wsRef.current = null;
     }
 
-    const currText = streamingTextRef.current;
+    const currText = displayedStreamingTextRef.current || streamingTextRef.current;
+    resetPacingRefs();
     updateStreamingText('');
 
     if (currText.trim()) {
@@ -452,6 +520,7 @@ export function useWebSocket(
     const userQuery = textToUse !== undefined ? textToUse.trim() : inputText.trim();
     if (!userQuery && !stagedAttachment) return;
 
+    resetPacingRefs();
     setWorkflowNodes([]);
     setThinkingLogs([]);
     sessionRef.current.setIsThinkingLogsOpen?.(false);
@@ -789,6 +858,8 @@ export function useWebSocket(
     // Remove this user message and all subsequent messages locally
     setMessages((prev) => prev.slice(0, userMsgIndex));
 
+    resetPacingRefs();
+
     if (token?.startsWith('mock-')) {
       handleSendMessage(previousUserQuery);
       return;
@@ -834,6 +905,7 @@ export function useWebSocket(
       hour12: true,
     });
 
+    resetPacingRefs();
     setMessages((prev) => [
       ...prev,
       { id: generateRandomId('user'), role: 'user', content: answer },

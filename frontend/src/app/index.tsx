@@ -137,6 +137,7 @@ export default function ChatScreen() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [showModelModal, setShowModelModal] = useState(false);
   const [showVariantDropdown, setShowVariantDropdown] = useState(false);
+  const [showMediaPopover, setShowMediaPopover] = useState(false);
 
   // UI Toggles & Drawers
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -727,8 +728,8 @@ export default function ChatScreen() {
           contextPercent={contextPercent}
           stagedAttachment={mediaPickers.stagedAttachment}
           setStagedAttachment={mediaPickers.setStagedAttachment}
-          showMediaPopover={mediaPickers.uploadingFile}
-          setShowMediaPopover={mediaPickers.setUploadingFile}
+          showMediaPopover={showMediaPopover}
+          setShowMediaPopover={setShowMediaPopover}
           handleCameraPress={mediaPickers.handleCameraPress}
           handlePhotosPress={mediaPickers.handlePhotosPress}
           handleFilesPress={mediaPickers.handleFilesPress}

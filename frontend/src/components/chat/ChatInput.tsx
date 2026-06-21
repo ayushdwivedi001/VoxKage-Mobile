@@ -106,10 +106,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [inputHeight, setInputHeight] = React.useState(Platform.OS === 'web' ? 40 : 36);
   const isBtwActive = !!(showBtwOverlay || (inputText && inputText.trim().startsWith('/btw')));
 
+  const prevTextLength = React.useRef(inputText.length);
+
   React.useEffect(() => {
     if (!inputText) {
       setInputHeight(Platform.OS === 'web' ? 40 : 36);
+    } else if (inputText.length < prevTextLength.current) {
+      // If characters were deleted/cleared, temporarily force min height so onContentSizeChange can shrink it correctly
+      setInputHeight(Platform.OS === 'web' ? 40 : 36);
     }
+    prevTextLength.current = inputText.length;
   }, [inputText]);
   React.useEffect(() => {
     if (showTooltip) {
@@ -349,7 +355,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             styles.inputField,
             { height: Math.max(Platform.OS === 'web' ? 40 : 36, Math.min(150, inputHeight)) }
           ]}
-          placeholder="Message VoxKage..."
+          placeholder="Ask VoxKage.. , / for command actions"
           placeholderTextColor="#475569"
           value={inputText}
           onChangeText={(text) => {

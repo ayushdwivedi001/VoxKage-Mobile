@@ -1,9 +1,28 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
 import Svg, { Rect, Line, Circle, Path, Text as SvgText } from 'react-native-svg';
+
+// --- Lightweight FadeInView Helper Component ---
+function FadeInView({ children, style }: { children: React.ReactNode; style?: any }) {
+  const fadeAnim = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 350,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [fadeAnim]);
+
+  return (
+    <Animated.View style={[{ opacity: fadeAnim }, style]}>
+      {children}
+    </Animated.View>
+  );
+}
 
 // --- Helper to parse HTML-style tags attributes ---
 function parseAttributes(rawAttrs: string): Record<string, string> {
@@ -569,75 +588,83 @@ function parseCustomComponents(text: string, keyPrefix: string, onDrillAnswer?: 
 
     if (tagName === 'LinkCard') {
       elements.push(
-        <LinkCardComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          title={attrs.title || ''}
-          url={attrs.url || ''}
-          desc={attrs.desc || attrs.description || ''}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <LinkCardComponent
+            title={attrs.title || ''}
+            url={attrs.url || ''}
+            desc={attrs.desc || attrs.description || ''}
+          />
+        </FadeInView>
       );
     } else if (tagName === 'Map') {
       elements.push(
-        <MapComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          lat={parseFloat(attrs.lat || '0')}
-          lng={parseFloat(attrs.lng || '0')}
-          label={attrs.label || 'Location'}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <MapComponent
+            lat={parseFloat(attrs.lat || '0')}
+            lng={parseFloat(attrs.lng || '0')}
+            label={attrs.label || 'Location'}
+          />
+        </FadeInView>
       );
     } else if (tagName === 'ButtonRow') {
       elements.push(
-        <ButtonRowComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          buttonsString={attrs.buttons || ''}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <ButtonRowComponent
+            buttonsString={attrs.buttons || ''}
+          />
+        </FadeInView>
       );
     } else if (tagName === 'Chart') {
       elements.push(
-        <ChartComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          type={attrs.type || 'line'}
-          dataString={attrs.data || ''}
-          labelsString={attrs.labels || ''}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <ChartComponent
+            type={attrs.type || 'line'}
+            dataString={attrs.data || ''}
+            labelsString={attrs.labels || ''}
+          />
+        </FadeInView>
       );
     } else if (tagName === 'Carousel') {
       elements.push(
-        <CarouselComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          imagesString={attrs.images || ''}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <CarouselComponent
+            imagesString={attrs.images || ''}
+          />
+        </FadeInView>
       );
     } else if (tagName === 'Weather') {
       elements.push(
-        <WeatherComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          temp={attrs.temp || ''}
-          condition={attrs.condition || ''}
-          humidity={attrs.humidity || ''}
-          wind={attrs.wind || ''}
-          uv={attrs.uv || ''}
-          city={attrs.city || 'Location'}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <WeatherComponent
+            temp={attrs.temp || ''}
+            condition={attrs.condition || ''}
+            humidity={attrs.humidity || ''}
+            wind={attrs.wind || ''}
+            uv={attrs.uv || ''}
+            city={attrs.city || 'Location'}
+          />
+        </FadeInView>
       );
     } else if (tagName === 'TaskList') {
       elements.push(
-        <TaskListComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          itemsString={attrs.items || ''}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <TaskListComponent
+            itemsString={attrs.items || ''}
+          />
+        </FadeInView>
       );
     } else if (tagName === 'DrillQuestion') {
       elements.push(
-        <DrillQuestionComponent
-          key={`component-${keyPrefix}-${match.index}`}
-          id={attrs.id || ''}
-          question={attrs.question || ''}
-          optionsString={attrs.options || ''}
-          current={attrs.current || '1'}
-          total={attrs.total || '1'}
-          onDrillAnswer={onDrillAnswer}
-        />
+        <FadeInView key={`component-${keyPrefix}-${match.index}`}>
+          <DrillQuestionComponent
+            id={attrs.id || ''}
+            question={attrs.question || ''}
+            optionsString={attrs.options || ''}
+            current={attrs.current || '1'}
+            total={attrs.total || '1'}
+            onDrillAnswer={onDrillAnswer}
+          />
+        </FadeInView>
       );
     }
 
@@ -691,20 +718,22 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
 
     // Render code block with VS Code syntax highlighting
     elements.push(
-      <View key={`code-${match.index}`} style={styles.codeBlockContainer}>
-        <View style={styles.codeBlockHeader}>
-          <Text style={styles.codeLanguage}>{language.toUpperCase()}</Text>
-          <TouchableOpacity onPress={() => handleCopyCode(code)} style={styles.copyButton}>
-            <Ionicons name="copy-outline" size={14} color="#8e8e93" />
-            <Text style={styles.copyText}>Copy</Text>
-          </TouchableOpacity>
+      <FadeInView key={`code-${match.index}`}>
+        <View style={styles.codeBlockContainer}>
+          <View style={styles.codeBlockHeader}>
+            <Text style={styles.codeLanguage}>{language.toUpperCase()}</Text>
+            <TouchableOpacity onPress={() => handleCopyCode(code)} style={styles.copyButton}>
+              <Ionicons name="copy-outline" size={14} color="#8e8e93" />
+              <Text style={styles.copyText}>Copy</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.horizontalScroll}>
+            <Text style={styles.codeContainer}>
+              {highlightVSCode(code.trim(), language.toLowerCase())}
+            </Text>
+          </ScrollView>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.horizontalScroll}>
-          <Text style={styles.codeContainer}>
-            {highlightVSCode(code.trim(), language.toLowerCase())}
-          </Text>
-        </ScrollView>
-      </View>
+      </FadeInView>
     );
 
     lastIndex = codeBlockRegex.lastIndex;
@@ -915,13 +944,19 @@ function renderTextWithInlineFormatting(rawText: string) {
       }
       
       if (tableLines.length >= 2) {
-        renderedElements.push(renderTable(tableLines, i));
+        renderedElements.push(
+          <FadeInView key={`table-${i}`}>
+            {renderTable(tableLines, i)}
+          </FadeInView>
+        );
       } else {
         tableLines.forEach((tblLine, idx) => {
           renderedElements.push(
-            <Text key={`line-tbl-fail-${i}-${idx}`} style={styles.bodyText}>
-              {renderInlineSpans(tblLine)}
-            </Text>
+            <FadeInView key={`line-tbl-fail-${i}-${idx}`}>
+              <Text style={styles.bodyText}>
+                {renderInlineSpans(tblLine)}
+              </Text>
+            </FadeInView>
           );
         });
       }
@@ -934,17 +969,21 @@ function renderTextWithInlineFormatting(rawText: string) {
       const headerStyle =
         level === 1 ? styles.h1 : level === 2 ? styles.h2 : styles.h3;
       renderedElements.push(
-        <Text key={`h-${i}`} style={[styles.header, headerStyle]}>
-          {renderInlineSpans(cleanText)}
-        </Text>
+        <FadeInView key={`h-${i}`}>
+          <Text style={[styles.header, headerStyle]}>
+            {renderInlineSpans(cleanText)}
+          </Text>
+        </FadeInView>
       );
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
       const cleanText = line.substring(2);
       renderedElements.push(
-        <View key={`bullet-${i}`} style={styles.bulletRow}>
-          <Text style={styles.bulletDot}>•</Text>
-          <Text style={styles.bulletText}>{renderInlineSpans(cleanText)}</Text>
-        </View>
+        <FadeInView key={`bullet-${i}`}>
+          <View style={styles.bulletRow}>
+            <Text style={styles.bulletDot}>•</Text>
+            <Text style={styles.bulletText}>{renderInlineSpans(cleanText)}</Text>
+          </View>
+        </FadeInView>
       );
     } else {
       const numListMatch = line.match(/^(\d+)\.\s(.*)/);
@@ -952,18 +991,22 @@ function renderTextWithInlineFormatting(rawText: string) {
         const num = numListMatch[1];
         const cleanText = numListMatch[2];
         renderedElements.push(
-          <View key={`num-${i}`} style={styles.bulletRow}>
-            <Text style={styles.bulletNum}>{num}.</Text>
-            <Text style={styles.bulletText}>{renderInlineSpans(cleanText)}</Text>
-          </View>
+          <FadeInView key={`num-${i}`}>
+            <View style={styles.bulletRow}>
+              <Text style={styles.bulletNum}>{num}.</Text>
+              <Text style={styles.bulletText}>{renderInlineSpans(cleanText)}</Text>
+            </View>
+          </FadeInView>
         );
       } else if (line.trim() === '') {
         renderedElements.push(<View key={`empty-${i}`} style={styles.emptyLine} />);
       } else {
         renderedElements.push(
-          <Text key={`line-${i}`} style={styles.bodyText}>
-            {renderInlineSpans(line)}
-          </Text>
+          <FadeInView key={`line-${i}`}>
+            <Text style={styles.bodyText}>
+              {renderInlineSpans(line)}
+            </Text>
+          </FadeInView>
         );
       }
     }
