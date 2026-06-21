@@ -80,13 +80,14 @@ def get_tool_label(name: str, args: dict) -> str:
 def run_matplotlib_script(code: str, title: str) -> str:
     """
     Executes a matplotlib python script, captures the active plot,
-    and returns a base64-encoded markdown image tag.
+    saves it to disk, and returns a markdown image tag pointing to the static path.
     """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    import io
-    import base64
+    import uuid
+    import os
+    from file_handler import UPLOAD_DIR
 
     loc = {}
     try:
@@ -110,13 +111,14 @@ def run_matplotlib_script(code: str, title: str) -> str:
         if not plt.get_fignums():
             return "Error: The code ran successfully but did not create any matplotlib figure/plot, Sir."
             
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', bbox_inches='tight', transparent=True, dpi=160)
-        buf.seek(0)
-        img_str = base64.b64encode(buf.read()).decode('utf-8')
+        filename = f"matplotlib_{uuid.uuid4().hex}.png"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        # Save to upload dir
+        plt.savefig(file_path, format='png', bbox_inches='tight', transparent=True, dpi=160)
         plt.close('all')
         
-        return f"![{title}](data:image/png;base64,{img_str})"
+        return f"![{title}](/static/{filename})"
     except Exception as e:
         plt.close('all')
         return f"Error executing plotting code: {str(e)}"

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated, Modal } from 'react-native';
 
 // --- Dedicated Static Require Helpers to prevent Metro build/compilation errors ---
@@ -9,39 +9,47 @@ const getMediaLibrary = () => {
   try { return require('expo-media-library'); } catch { return null; }
 };
 
-const saveBase64Image = async (base64String: string) => {
+const saveImageToGallery = async (uri: string) => {
   try {
     const FileSystem = getFileSystem();
     const MediaLibrary = getMediaLibrary();
 
     if (!FileSystem || !MediaLibrary) {
-      Clipboard.setString(base64String);
+      Clipboard.setString(uri);
       if (Platform.OS === 'android') {
-        ToastAndroid.show('Image data copied to clipboard, Sir', ToastAndroid.SHORT);
+        ToastAndroid.show('Image link/data copied to clipboard, Sir', ToastAndroid.SHORT);
       } else {
-        Alert.alert('Success', 'Image data copied to clipboard, Sir.');
+        Alert.alert('Success', 'Image link/data copied to clipboard, Sir.');
       }
       return;
     }
 
-    const base64Data = base64String.replace(/^data:image\/\w+;base64,/, '');
-    const filename = `matplotlib_${Date.now()}.png`;
-    const fileUri = `${FileSystem.cacheDirectory}${filename}`;
-
-    await FileSystem.writeAsStringAsync(fileUri, base64Data, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-
     const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status === 'granted') {
-      await MediaLibrary.createAssetAsync(fileUri);
-      if (Platform.OS === 'android') {
-        ToastAndroid.show('Image saved to Gallery, Sir!', ToastAndroid.SHORT);
-      } else {
-        Alert.alert('Saved', 'Image saved to Gallery, Sir!');
-      }
-    } else {
+    if (status !== 'granted') {
       Alert.alert('Permission Denied', 'Permission to access media library was denied, Sir.');
+      return;
+    }
+
+    let fileUri = '';
+    if (uri.startsWith('data:image/')) {
+      const base64Data = uri.replace(/^data:image\/\w+;base64,/, '');
+      const filename = `matplotlib_${Date.now()}.png`;
+      fileUri = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } else {
+      const filename = `matplotlib_${Date.now()}.png`;
+      fileUri = `${FileSystem.cacheDirectory}${filename}`;
+      const { uri: localUri } = await FileSystem.downloadAsync(uri, fileUri);
+      fileUri = localUri;
+    }
+
+    await MediaLibrary.createAssetAsync(fileUri);
+    if (Platform.OS === 'android') {
+      ToastAndroid.show('Image saved to Gallery, Sir!', ToastAndroid.SHORT);
+    } else {
+      Alert.alert('Saved', 'Image saved to Gallery, Sir!');
     }
   } catch (err: any) {
     console.error('Failed to save image:', err);
@@ -384,11 +392,36 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress }: Ima
   const isBase64 = uri && uri.startsWith('data:image/');
   const [loading, setLoading] = useState(!isBase64);
   const [error, setError] = useState(false);
+  const [resolvedUri, setResolvedUri] = useState(uri);
+
+  useEffect(() => {
+    let active = true;
+    const resolveUri = async () => {
+      if (uri && !uri.startsWith('http://') && !uri.startsWith('https://') && !uri.startsWith('data:')) {
+        try {
+          const { storage } = require('@/utils/storage');
+          const baseUrl = await storage.getBackendUrl();
+          if (active) {
+            const cleanBase = baseUrl.trim().replace(/\/$/, '');
+            const cleanPath = uri.startsWith('/') ? uri : `/${uri}`;
+            setResolvedUri(`${cleanBase}${cleanPath}`);
+          }
+        } catch (e) {
+          console.log('[ImageWithLoader] Error getting backend url:', e);
+          if (active) setResolvedUri(uri);
+        }
+      } else {
+        if (active) setResolvedUri(uri);
+      }
+    };
+    resolveUri();
+    return () => { active = false; };
+  }, [uri]);
 
   let headers: Record<string, string> = {};
-  if (uri && !isBase64) {
+  if (resolvedUri && !resolvedUri.startsWith('data:')) {
     try {
-      const match = uri.match(/^(https?:\/\/[^\/]+)/);
+      const match = resolvedUri.match(/^(https?:\/\/[^\/]+)/);
       if (match) {
         headers['Referer'] = match[1] + '/';
         headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -403,7 +436,7 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress }: Ima
       <View style={[styles.imageWrapper, style]}>
         {!error ? (
           <Image
-            source={isBase64 ? { uri } : { uri, headers }}
+            source={isBase64 ? { uri: resolvedUri } : { uri: resolvedUri, headers }}
             style={[style, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}
             resizeMode={resizeMode}
             onLoadStart={isBase64 ? undefined : () => setLoading(true)}
@@ -443,6 +476,29 @@ interface MarkdownImageProps {
 }
 
 function MarkdownImage({ uri, alt, onPressImage }: MarkdownImageProps) {
+  const [resolvedUri, setResolvedUri] = useState(uri);
+  
+  useEffect(() => {
+    let active = true;
+    const resolveUri = async () => {
+      if (uri && !uri.startsWith('http://') && !uri.startsWith('https://') && !uri.startsWith('data:')) {
+        try {
+          const { storage } = require('@/utils/storage');
+          const baseUrl = await storage.getBackendUrl();
+          if (active) {
+            const cleanBase = baseUrl.trim().replace(/\/$/, '');
+            const cleanPath = uri.startsWith('/') ? uri : `/${uri}`;
+            setResolvedUri(`${cleanBase}${cleanPath}`);
+          }
+        } catch (e) {
+          console.log('[MarkdownImage] Error getting backend url:', e);
+        }
+      }
+    };
+    resolveUri();
+    return () => { active = false; };
+  }, [uri]);
+
   return (
     <View style={styles.imageCard}>
       {alt ? <Text style={styles.imageCardTitle}>{alt}</Text> : null}
@@ -453,6 +509,24 @@ function MarkdownImage({ uri, alt, onPressImage }: MarkdownImageProps) {
         resizeMode="contain"
         onPress={onPressImage ? () => onPressImage(uri, alt) : undefined}
       />
+      <View style={styles.imageCardActionBar}>
+        {onPressImage && (
+          <TouchableOpacity 
+            onPress={() => onPressImage(uri, alt)} 
+            style={styles.imageCardActionBtn}
+          >
+            <Ionicons name="expand-outline" size={13} color="#94a3b8" />
+            <Text style={styles.imageCardActionText}>Zoom Chart</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity 
+          onPress={() => saveImageToGallery(resolvedUri)} 
+          style={[styles.imageCardActionBtn, styles.imageCardActionBtnPrimary]}
+        >
+          <Ionicons name="download-outline" size={13} color="#60a5fa" />
+          <Text style={[styles.imageCardActionText, styles.imageCardActionTextPrimary]}>Save to Gallery</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -838,8 +912,20 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
   const [scaleAnim] = useState(() => new Animated.Value(0.9));
   const [opacityAnim] = useState(() => new Animated.Value(0));
 
-  const handlePressImage = (uri: string, alt?: string) => {
-    setActiveImage({ uri, alt });
+  const handlePressImage = async (uri: string, alt?: string) => {
+    let resolvedUri = uri;
+    if (uri && !uri.startsWith('http://') && !uri.startsWith('https://') && !uri.startsWith('data:')) {
+      try {
+        const { storage } = require('@/utils/storage');
+        const baseUrl = await storage.getBackendUrl();
+        const cleanBase = baseUrl.trim().replace(/\/$/, '');
+        const cleanPath = uri.startsWith('/') ? uri : `/${uri}`;
+        resolvedUri = `${cleanBase}${cleanPath}`;
+      } catch (e) {
+        console.log('[handlePressImage] Error getting backend url:', e);
+      }
+    }
+    setActiveImage({ uri: resolvedUri, alt });
     Animated.parallel([
       Animated.timing(scaleAnim, {
         toValue: 1,
@@ -981,24 +1067,24 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
               ) : null}
               
               <View style={styles.lightboxButtons}>
-                {activeImage.uri.startsWith('data:image/') ? (
-                  <TouchableOpacity 
-                    onPress={() => saveBase64Image(activeImage.uri)} 
-                    style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
-                  >
-                    <Ionicons name="download-outline" size={16} color="#ffffff" />
-                    <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
-                      Save to Gallery
-                    </Text>
-                  </TouchableOpacity>
-                ) : (
+                <TouchableOpacity 
+                  onPress={() => saveImageToGallery(activeImage.uri)} 
+                  style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
+                >
+                  <Ionicons name="download-outline" size={16} color="#ffffff" />
+                  <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
+                    Save to Gallery
+                  </Text>
+                </TouchableOpacity>
+                
+                {!activeImage.uri.startsWith('data:image/') && (
                   <>
                     <TouchableOpacity 
                       onPress={() => WebBrowser.openBrowserAsync(activeImage.uri)} 
-                      style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
+                      style={styles.lightboxButton}
                     >
-                      <Ionicons name="open-outline" size={16} color="#ffffff" />
-                      <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
+                      <Ionicons name="open-outline" size={16} color="#e2e8f0" />
+                      <Text style={styles.lightboxButtonText}>
                         Source Link
                       </Text>
                     </TouchableOpacity>
@@ -1995,7 +2081,37 @@ const styles = StyleSheet.create({
   },
   markdownImage: {
     width: '100%',
-    height: '100%',
+    height: 220,
+  },
+  imageCardActionBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 10,
+  },
+  imageCardActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#171717',
+    borderWidth: 1,
+    borderColor: '#262626',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  imageCardActionBtnPrimary: {
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    borderColor: 'rgba(59, 130, 246, 0.25)',
+  },
+  imageCardActionText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: -0.1,
+  },
+  imageCardActionTextPrimary: {
+    color: '#60a5fa',
   },
   imageErrorContainer: {
     position: 'absolute',
