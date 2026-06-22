@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated, Modal, Dimensions } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Linking, ActivityIndicator, Animated, Modal, Dimensions } from 'react-native';
+import { Image } from 'expo-image';
 
 // --- Dedicated Static Require Helpers to prevent Metro build/compilation errors ---
 const getFileSystem = () => {
@@ -488,6 +489,19 @@ interface ImageWithLoaderProps {
   onError?: () => void;
 }
 
+const getImageSource = (uri: string) => {
+  if (!uri) return undefined;
+  if (uri.startsWith('data:image/') || uri.startsWith('file://')) {
+    return { uri };
+  }
+  return {
+    uri,
+    headers: {
+      'User-Agent': 'VoxKageMobile/1.0 (https://voxkage.vercel.app/; ayushdwivedi2049@gmail.com)'
+    }
+  };
+};
+
 function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', width, height, onPress, onError: onErrorProp }: ImageWithLoaderProps) {
   const isBase64 = uri && uri.startsWith('data:image/');
   const [loading, setLoading] = useState(!isBase64);
@@ -530,19 +544,6 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', width, height,
     return () => { active = false; };
   }, [uri]);
 
-  let headers: Record<string, string> = {};
-  if (resolvedUri && !resolvedUri.startsWith('data:')) {
-    try {
-      const match = resolvedUri.match(/^(https?:\/\/[^\/]+)/);
-      if (match) {
-        headers['Referer'] = match[1] + '/';
-        headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-      }
-    } catch (e) {
-      console.log('Error parsing origin for referer headers:', e);
-    }
-  }
-
   // Build the wrapper dimensions: prefer explicit pixel sizes (critical for RN native)
   // because percentage-based height (e.g. '100%') collapses to 0 without an explicit parent height.
   const wrapperStyle: any[] = [styles.imageWrapper];
@@ -558,52 +559,55 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', width, height,
   if (width !== undefined) imgStyle.width = width;
   if (height !== undefined) imgStyle.height = height;
 
-  return (
-    <TouchableOpacity onPress={onPress} disabled={loading || error || !onPress} style={wrapperStyle}>
-      <View style={wrapperStyle}>
-        {!error ? (
-          <Image
-            source={isBase64 ? { uri: resolvedUri } : { uri: resolvedUri, headers }}
-            style={imgStyle}
-            resizeMode={resizeMode}
-            onLoadStart={isBase64 ? undefined : () => {
-              // Only set loading=true on the FIRST load start, never on re-renders
-              if (!hasStartedLoadingRef.current && !hasFinishedLoadingRef.current) {
-                hasStartedLoadingRef.current = true;
-                setLoading(true);
-              }
-            }}
-            onLoadEnd={isBase64 ? undefined : () => {
-              if (!hasFinishedLoadingRef.current) {
-                hasFinishedLoadingRef.current = true;
-                setLoading(false);
-              }
-            }}
-            onError={() => {
-              setError(true);
-              setLoading(false);
-              if (onErrorProp) onErrorProp();
-            }}
-          />
-        ) : (
-          <View style={styles.imageErrorContainer}>
-            <Ionicons name="image-outline" size={28} color="#ef4444" style={{ marginBottom: 4 }} />
-            <Text style={styles.imageErrorText} numberOfLines={1}>Failed to load visual component, Sir.</Text>
-            {isBase64 ? (
-              <Text style={styles.imageErrorSubtext}>Corrupted base64 chart data.</Text>
-            ) : (
-              <Text style={styles.imageErrorSubtext} numberOfLines={1}>{alt || uri}</Text>
-            )}
-          </View>
-        )}
+  const ContainerComponent = onPress ? TouchableOpacity : View;
+  const containerProps = onPress ? { onPress, activeOpacity: 0.8 } : {};
 
-        {loading && !error && (
-          <View style={styles.imageLoadingContainer}>
-            <ActivityIndicator size="small" color="#3b82f6" />
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
+  return (
+    <ContainerComponent style={wrapperStyle} {...containerProps}>
+      {!error ? (
+        <Image
+          source={getImageSource(resolvedUri)}
+          style={imgStyle}
+          contentFit={resizeMode === 'stretch' ? 'fill' : resizeMode}
+          onLoadStart={isBase64 ? undefined : () => {
+            // Only set loading=true on the FIRST load start, never on re-renders
+            if (!hasStartedLoadingRef.current && !hasFinishedLoadingRef.current) {
+              hasStartedLoadingRef.current = true;
+              setLoading(true);
+            }
+          }}
+          onLoadEnd={isBase64 ? undefined : () => {
+            if (!hasFinishedLoadingRef.current) {
+              hasFinishedLoadingRef.current = true;
+              setLoading(false);
+            }
+          }}
+          onError={(e: any) => {
+            const errMsg = e.error || (e.nativeEvent && e.nativeEvent.error) || 'Unknown load error';
+            console.error('[ImageWithLoader] Native Image load failed for URI:', resolvedUri, errMsg);
+            setError(true);
+            setLoading(false);
+            if (onErrorProp) onErrorProp();
+          }}
+        />
+      ) : (
+        <View style={styles.imageErrorContainer}>
+          <Ionicons name="image-outline" size={28} color="#ef4444" style={{ marginBottom: 4 }} />
+          <Text style={styles.imageErrorText} numberOfLines={1}>Failed to load visual component, Sir.</Text>
+          {isBase64 ? (
+            <Text style={styles.imageErrorSubtext}>Corrupted base64 chart data.</Text>
+          ) : (
+            <Text style={styles.imageErrorSubtext} numberOfLines={1}>{alt || uri}</Text>
+          )}
+        </View>
+      )}
+
+      {loading && !error && (
+        <View style={styles.imageLoadingContainer}>
+          <ActivityIndicator size="small" color="#3b82f6" />
+        </View>
+      )}
+    </ContainerComponent>
   );
 }
 
@@ -645,6 +649,7 @@ function MarkdownImage({ uri, alt, onPressImage }: MarkdownImageProps) {
         uri={uri}
         alt={alt}
         style={styles.markdownImage}
+        height={200}
         resizeMode="contain"
         onPress={onPressImage ? () => onPressImage(uri, alt) : undefined}
       />
@@ -682,21 +687,48 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
   });
 
   const [activeIndex, setActiveIndex] = useState(0);
-  const [containerWidth, setContainerWidth] = useState(280);
+  const [containerWidth, setContainerWidth] = useState(() => Dimensions.get('window').width - 32);
   // Track valid (non-failed) URLs as state so the ScrollView only renders what works
   const [validUrls, setValidUrls] = useState<string[]>(initialUrls);
   // Track failures by URL string in a ref — never trigger re-renders for the same URL twice
   const failedUrlsRef = useRef<Set<string>>(new Set());
 
-  if (initialUrls.length === 0) return null;
+  // If there are no valid URLs, don't show the empty container at all!
+  if (validUrls.length === 0) return null;
 
   const handleImageError = (url: string) => {
-    // If this URL already failed, do nothing — prevents the re-render cascade
     if (failedUrlsRef.current.has(url)) return;
     failedUrlsRef.current.add(url);
-    // Update validUrls once, removing the failed URL — no cascade on other slides
+    console.warn('[CarouselComponent] Image failed to load, removing from slide:', url);
     setValidUrls(prev => prev.filter(u => u !== url));
   };
+
+  // If there's only 1 image, render a simple card to avoid horizontal ScrollView overhead and dot indicators
+  if (validUrls.length === 1) {
+    const singleUrl = validUrls[0];
+    return (
+      <View 
+        style={styles.carouselContainer}
+        onLayout={(e) => {
+          const { width } = e.nativeEvent.layout;
+          if (width > 0) setContainerWidth(width);
+        }}
+      >
+        <View style={{ width: containerWidth, height: 180, overflow: 'hidden' }}>
+          <ImageWithLoader
+            uri={singleUrl}
+            alt="Visual component"
+            style={styles.carouselImage}
+            width={containerWidth}
+            height={180}
+            resizeMode="cover"
+            onPress={onPressImage ? () => onPressImage(singleUrl, "Visual component") : undefined}
+            onError={() => handleImageError(singleUrl)}
+          />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View
@@ -709,6 +741,9 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
       <ScrollView
         horizontal
         pagingEnabled
+        snapToInterval={containerWidth}
+        snapToAlignment="center"
+        decelerationRate="fast"
         showsHorizontalScrollIndicator={false}
         onScroll={(e) => {
           const slide = Math.round(e.nativeEvent.contentOffset.x / containerWidth);
@@ -716,13 +751,10 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
             setActiveIndex(slide);
           }
         }}
-        scrollEventThrottle={200}
+        scrollEventThrottle={16}
         style={[styles.carouselScroll, { height: 180 }]}
       >
-        {/* Only render validUrls — failed images are removed from the DOM entirely */}
         {validUrls.map((url, idx) => (
-          // Explicit pixel width & height on the slide AND ImageWithLoader — critical for RN native
-          // On native, percentage sizes collapse to 0 without a parent with explicit dimensions.
           <View key={`img-slide-${url}`} style={{ width: containerWidth, height: 180, overflow: 'hidden' }}>
             <ImageWithLoader
               uri={url}
@@ -737,7 +769,7 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
           </View>
         ))}
       </ScrollView>
-      {validUrls.length > 1 ? (
+      {validUrls.length > 1 && (
         <View style={styles.carouselDots}>
           {validUrls.map((_, idx) => (
             <View
@@ -749,7 +781,7 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
             />
           ))}
         </View>
-      ) : null}
+      )}
     </View>
   );
 }
@@ -1240,16 +1272,16 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
                     contentContainerStyle={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
                   >
                     <Image
-                      source={{ uri: activeImage.uri }}
+                      source={getImageSource(activeImage.uri)}
                       style={styles.lightboxImage}
-                      resizeMode="contain"
+                      contentFit="contain"
                     />
                   </ScrollView>
                 ) : (
                   <Image
-                    source={{ uri: activeImage.uri }}
+                    source={getImageSource(activeImage.uri)}
                     style={styles.lightboxImage}
-                    resizeMode="contain"
+                    contentFit="contain"
                   />
                 )
               ) : (
