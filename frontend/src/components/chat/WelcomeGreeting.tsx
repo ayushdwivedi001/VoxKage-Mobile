@@ -5,12 +5,21 @@ import { styles } from './styles';
 import { replaceSir } from '@/utils/settings';
 
 const GREETINGS = [
-  "How can I help you today, Sir?",
-  "At your service, Sir. What shall we coordinate today?",
-  "System online, Sir. Awaiting your instructions.",
-  "Good day, Sir. I stand ready for multi-task orchestration.",
-  "All modules initialized, Sir. Ready to execute your commands.",
-  "VoxKage Mobile interface ready. How may I assist you, Sir?"
+  "Ready when you are.",
+  "What's the play?",
+  "All set. Hit me.",
+  "Go ahead.",
+  "Standing by.",
+  "What are we thinking?",
+  "Let's get to it.",
+  "I'm listening.",
+  "Your call.",
+  "Let's roll.",
+  "Pick your target.",
+  "Where to?",
+  "All yours.",
+  "Fire away.",
+  "Your move.",
 ];
 
 export const WelcomeGreeting: React.FC = () => {
