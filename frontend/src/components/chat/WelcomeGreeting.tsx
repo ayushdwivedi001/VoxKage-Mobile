@@ -34,7 +34,7 @@ export const WelcomeGreeting: React.FC = () => {
     <View style={styles.welcomeContainer}>
       <Image 
         source={require('@/assets/images/android-icon-foreground.png')} 
-        style={{ width: 72, height: 72 }}
+        style={{ width: 110, height: 110 }}
         contentFit="contain"
       />
       <Text style={styles.welcomeText}>{replaceSir(greeting)}</Text>

@@ -218,15 +218,19 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             const showWorkflow = isActiveResponse && workflowNodes.length > 0;
             const showConfirmation = isActiveResponse && !!confirmationToolName;
 
+            const isCompleted = item.id !== 'active_response' && item.id !== 'thinking';
+
             return (
-              <View style={styles.assistantBubbleWrapper}>
-                <View style={styles.assistantAvatar}>
-                  <Image 
-                    source={require('@/assets/images/icon.png')} 
-                    style={{ width: 18, height: 18, borderRadius: 4 }}
-                    contentFit="contain"
-                  />
-                </View>
+              <View style={[styles.assistantBubbleWrapper, isCompleted && { maxWidth: '98%', width: '98%' }]}>
+                {!isCompleted && (
+                  <View style={styles.assistantAvatar}>
+                    <Image 
+                      source={require('@/assets/images/android-icon-foreground.png')} 
+                      style={{ width: 28, height: 28 }}
+                      contentFit="contain"
+                    />
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
                   {/* Collapsible Thinking Accordion Header */}
                   {showThinkingHeader && (
@@ -313,6 +317,11 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   {item.id !== 'active_response' && item.id !== 'thinking' && (
                     <View style={styles.assistantActionsRow}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                        <Image 
+                          source={require('@/assets/images/android-icon-foreground.png')} 
+                          style={{ width: 18, height: 18 }}
+                          contentFit="contain"
+                        />
                         <TouchableOpacity 
                           onPress={() => handleSpeak(cleanContent, item.id)} 
                           style={styles.assistantActionBtn}

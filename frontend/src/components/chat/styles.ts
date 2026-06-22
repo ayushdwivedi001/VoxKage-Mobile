@@ -115,12 +115,8 @@ export const styles = StyleSheet.create({
   assistantAvatar: {
     width: 28,
     height: 28,
-    borderRadius: 8,
-    backgroundColor: '#0c1222',
     justifyContent: 'center',
     alignItems: 'center',
-    borderColor: '#1e293b',
-    borderWidth: 1,
   },
   avatarText: {
     color: '#2563eb',

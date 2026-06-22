@@ -76,7 +76,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
         <View style={styles.sidebarHeader}>
           <Image 
             source={require('@/assets/images/android-icon-foreground.png')} 
-            style={{ width: 24, height: 24 }}
+            style={{ width: 32, height: 32 }}
             contentFit="contain"
           />
           <Text style={styles.sidebarTitle}>VoxKage</Text>
