@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Clipboard, ToastAndroid, Platform, Alert, Image, Linking, ActivityIndicator, Animated, Modal, Dimensions } from 'react-native';
 
 // --- Dedicated Static Require Helpers to prevent Metro build/compilation errors ---
@@ -489,6 +489,18 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress, onErr
   const [loading, setLoading] = useState(!isBase64);
   const [error, setError] = useState(false);
   const [resolvedUri, setResolvedUri] = useState(uri);
+  // Guard: onLoadStart must only set loading=true ONCE per mount to prevent
+  // the glitchy "constantly loading" spinner caused by re-renders resetting the flag.
+  const hasStartedLoadingRef = useRef(false);
+  const hasFinishedLoadingRef = useRef(false);
+
+  useEffect(() => {
+    // Reset loading guards when URI changes (new image source)
+    hasStartedLoadingRef.current = false;
+    hasFinishedLoadingRef.current = false;
+    setLoading(!isBase64);
+    setError(false);
+  }, [uri]);
 
   useEffect(() => {
     let active = true;
@@ -535,8 +547,19 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress, onErr
             source={isBase64 ? { uri: resolvedUri } : { uri: resolvedUri, headers }}
             style={[style, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}
             resizeMode={resizeMode}
-            onLoadStart={isBase64 ? undefined : () => setLoading(true)}
-            onLoadEnd={isBase64 ? undefined : () => setLoading(false)}
+            onLoadStart={isBase64 ? undefined : () => {
+              // Only set loading=true on the FIRST load start, never on re-renders
+              if (!hasStartedLoadingRef.current && !hasFinishedLoadingRef.current) {
+                hasStartedLoadingRef.current = true;
+                setLoading(true);
+              }
+            }}
+            onLoadEnd={isBase64 ? undefined : () => {
+              if (!hasFinishedLoadingRef.current) {
+                hasFinishedLoadingRef.current = true;
+                setLoading(false);
+              }
+            }}
             onError={() => {
               setError(true);
               setLoading(false);
@@ -632,7 +655,7 @@ function MarkdownImage({ uri, alt, onPressImage }: MarkdownImageProps) {
 function CarouselComponent({ imagesString, onPressImage }: { imagesString: string; onPressImage?: (uri: string, alt?: string) => void }) {
   // Validate and filter URLs before rendering — prevents broken slide errors
   const BLOCKED = ["data:image", ".svg", ".ogg", ".pdf", ".tiff", "bing.com/th", "encrypted-tbn", "gstatic.com"];
-  const rawUrls = imagesString.split(',').map(url => url.trim()).filter(url => {
+  const initialUrls = imagesString.split(',').map(url => url.trim()).filter(url => {
     if (!url || !url.startsWith('https://')) return false;
     const lower = url.toLowerCase();
     if (BLOCKED.some(b => lower.includes(b))) return false;
@@ -641,12 +664,20 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [containerWidth, setContainerWidth] = useState(280);
-  // Track which slide indices have failed to load (hide them silently)
-  const [failedIndices, setFailedIndices] = useState<Set<number>>(new Set());
+  // Track valid (non-failed) URLs as state so the ScrollView only renders what works
+  const [validUrls, setValidUrls] = useState<string[]>(initialUrls);
+  // Track failures by URL string in a ref — never trigger re-renders for the same URL twice
+  const failedUrlsRef = useRef<Set<string>>(new Set());
 
-  const validUrls = rawUrls.filter((_, idx) => !failedIndices.has(idx));
+  if (initialUrls.length === 0) return null;
 
-  if (rawUrls.length === 0) return null;
+  const handleImageError = (url: string) => {
+    // If this URL already failed, do nothing — prevents the re-render cascade
+    if (failedUrlsRef.current.has(url)) return;
+    failedUrlsRef.current.add(url);
+    // Update validUrls once, removing the failed URL — no cascade on other slides
+    setValidUrls(prev => prev.filter(u => u !== url));
+  };
 
   return (
     <View
@@ -669,33 +700,30 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
         scrollEventThrottle={200}
         style={styles.carouselScroll}
       >
-        {rawUrls.map((url, idx) => (
-          <View key={`img-slide-${idx}`} style={{ width: containerWidth, height: 180, display: failedIndices.has(idx) ? 'none' : 'flex' }}>
+        {/* Only render validUrls — failed images are removed from the DOM entirely */}
+        {validUrls.map((url, idx) => (
+          <View key={`img-slide-${url}`} style={{ width: containerWidth, height: 180 }}>
             <ImageWithLoader
               uri={url}
               alt={`Slide ${idx + 1}`}
-              style={[styles.carouselImage, failedIndices.has(idx) ? { display: 'none' } : {}]}
+              style={styles.carouselImage}
               resizeMode="cover"
               onPress={onPressImage ? () => onPressImage(url, `Slide ${idx + 1}`) : undefined}
-              onError={() => {
-                setFailedIndices(prev => new Set([...prev, idx]));
-              }}
+              onError={() => handleImageError(url)}
             />
           </View>
         ))}
       </ScrollView>
-      {rawUrls.length > 1 ? (
+      {validUrls.length > 1 ? (
         <View style={styles.carouselDots}>
-          {rawUrls.map((_, idx) => (
-            failedIndices.has(idx) ? null : (
-              <View
-                key={`dot-${idx}`}
-                style={[
-                  styles.carouselDot,
-                  idx === activeIndex && styles.carouselDotActive
-                ]}
-              />
-            )
+          {validUrls.map((_, idx) => (
+            <View
+              key={`dot-${idx}`}
+              style={[
+                styles.carouselDot,
+                idx === activeIndex && styles.carouselDotActive
+              ]}
+            />
           ))}
         </View>
       ) : null}

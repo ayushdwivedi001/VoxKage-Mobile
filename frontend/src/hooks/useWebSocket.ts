@@ -264,9 +264,13 @@ export function useWebSocket(
         }
 
         const nextText = displayed + buffer.substring(displayed.length, displayed.length + charsToAppend);
-        displayedStreamingTextRef.current = nextText;
-        setStreamingText(nextText);
-        streamingTextRef.current = nextText;
+        // Guard: only call setState if the text has actually changed, preventing
+        // "Maximum update depth exceeded" from setInterval firing at 18ms intervals.
+        if (nextText !== displayed) {
+          displayedStreamingTextRef.current = nextText;
+          setStreamingText(nextText);
+          streamingTextRef.current = nextText;
+        }
       } else if (isDoneReceivedRef.current) {
         clearInterval(pacingIntervalRef.current);
         pacingIntervalRef.current = null;
@@ -274,6 +278,7 @@ export function useWebSocket(
       }
     }, 18);
   };
+
 
   const updateStreamingText = (text: string | ((prev: string) => string)) => {
     setStreamingText((prev) => {

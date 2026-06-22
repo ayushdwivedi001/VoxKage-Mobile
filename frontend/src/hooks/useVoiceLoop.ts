@@ -1,12 +1,5 @@
-import { useState, useRef } from 'react';
-
-let Audio: any = null;
-try {
-  const ExpoAV = require('expo-av');
-  Audio = ExpoAV ? ExpoAV.Audio : null;
-} catch (e) {
-  console.log('[useVoiceLoop] expo-av is not available, Sir. Using sandbox/mock fallback.');
-}
+import { useState, useEffect } from 'react';
+import { useAudioRecorder, RecordingPresets, AudioModule, useAudioRecorderState } from 'expo-audio';
 
 export function useVoiceLoop(
   backendUrl: string,
@@ -27,7 +20,27 @@ export function useVoiceLoop(
 ) {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [micVolume, setMicVolume] = useState(0.1);
-  const recordingRef = useRef<any>(null);
+
+  // Initialize the recorder with high quality and metering enabled
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  
+  // Track state with 80ms interval for smooth visualizer waves
+  const recorderState = useAudioRecorderState(audioRecorder, 80);
+
+  // Sync micVolume from the recorder's decibel metering
+  useEffect(() => {
+    if (recorderState.isRecording && recorderState.metering !== undefined) {
+      const db = recorderState.metering || -160;
+      const normalized = Math.max(-60, Math.min(0, db));
+      const vol = (normalized + 60) / 60;
+      setMicVolume(vol);
+    }
+  }, [recorderState.isRecording, recorderState.metering]);
+
+  // Handle active UI state sync
+  useEffect(() => {
+    setIsVoiceActive(recorderState.isRecording);
+  }, [recorderState.isRecording]);
 
   const transcribeAudio = async (uri: string) => {
     setThinkingStatus('Transcribing voice prompt, Sir...');
@@ -50,81 +63,50 @@ export function useVoiceLoop(
   };
 
   const handleVoicePress = async () => {
-    if (!Audio) {
+    if (!audioRecorder) {
       showAlert(
         'Voice Recording Unavailable',
-        'Microphone/Audio recording is not supported in this client. The expo-av module could not be loaded, Sir.'
+        'Microphone/Audio recording is not supported in this client. The expo-audio module could not be loaded, Sir.'
       );
       return;
     }
-    if (!isVoiceActive) {
+
+    if (!recorderState.isRecording) {
       try {
-        const { granted } = await Audio.requestPermissionsAsync();
-        if (!granted) {
+        const status = await AudioModule.requestRecordingPermissionsAsync();
+        if (!status.granted) {
           showAlert('Permission Denied', 'Microphone permission is required to record voice commands, Sir.');
           return;
         }
 
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
+        // Configure audio mode for recording
+        await AudioModule.setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+          interruptionMode: 'duckOthers',
+          shouldRouteThroughEarpiece: false,
         });
 
-        setIsVoiceActive(true);
+        // Prepare and start recording with metering
+        await audioRecorder.prepareToRecordAsync({
+          ...RecordingPresets.HIGH_QUALITY,
+          isMeteringEnabled: true,
+        });
+        
+        await audioRecorder.record();
         setMicVolume(0.1);
-
-        const { recording } = await Audio.Recording.createAsync(
-          {
-            isMeteringEnabled: true,
-            android: {
-              extension: '.m4a',
-              outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-              audioEncoder: Audio.AndroidAudioEncoder.AAC,
-              sampleRate: 16000,
-              numberOfChannels: 1,
-              bitRate: 64000,
-            },
-            ios: {
-              extension: '.m4a',
-              outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-              audioQuality: Audio.IOSAudioQuality.MEDIUM,
-              sampleRate: 16000,
-              numberOfChannels: 1,
-              bitRate: 64000,
-            },
-            web: {},
-          },
-          (status: any) => {
-            if (status.metering !== undefined) {
-              const db = status.metering || -160;
-              const normalized = Math.max(-60, Math.min(0, db));
-              const vol = (normalized + 60) / 60;
-              setMicVolume(vol);
-            }
-          },
-          80
-        );
-        recordingRef.current = recording;
       } catch (err: any) {
         showAlert('Microphone Error', `Failed to start recording: ${err.message}`);
-        setIsVoiceActive(false);
       }
     } else {
-      setIsVoiceActive(false);
-      const recording = recordingRef.current;
-      if (recording) {
-        recordingRef.current = null;
-        try {
-          await recording.stopAndUnloadAsync();
-          const uri = recording.getURI();
-          if (uri) {
-            await transcribeAudio(uri);
-          }
-        } catch (err: any) {
-          console.error('Error stopping audio recording:', err);
+      try {
+        await audioRecorder.stop();
+        const uri = audioRecorder.uri;
+        if (uri) {
+          await transcribeAudio(uri);
         }
+      } catch (err: any) {
+        console.error('Error stopping audio recording:', err);
       }
     }
   };

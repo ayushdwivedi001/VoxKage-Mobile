@@ -187,6 +187,30 @@ async def fetch_images_for_query(query: str, limit: int = 5) -> str:
         "User-Agent": "VoxKage/2.0 (https://voxkage.ai; contact@voxkage.ai) python-aiohttp"
     }
 
+    async def tier0_ddgs_images(query: str, count: int) -> list:
+        """
+        DuckDuckGo image search via the already-installed ddgs package — TIER 0 (Primary).
+        The ddgs.images() method returns direct JPG/PNG/WEBP URLs with no CAPTCHA,
+        no HTML scraping, and no rate limiting for reasonable volumes.
+        This is the most reliable source for real, renderable image URLs.
+        """
+        found = []
+        try:
+            from ddgs import DDGS
+
+            def _run():
+                with DDGS() as ddgs:
+                    return list(ddgs.images(query, max_results=count * 2))
+
+            results = await asyncio.to_thread(_run)
+            for r in results:
+                url = r.get("image", "") or r.get("thumbnail", "")
+                if url and is_renderable_image_url(url) and url not in found:
+                    found.append(url)
+        except Exception as e:
+            print(f"[fetch_images] Tier0 DDGS images error: {e}")
+        return found
+
     async def tier1_wikipedia_thumbnails(session, query: str, count: int) -> list:
         """
         Wikipedia Thumbnail API — TIER 1.
@@ -312,18 +336,19 @@ async def fetch_images_for_query(query: str, limit: int = 5) -> str:
     try:
         import aiohttp
 
-        connector = aiohttp.TCPConnector(limit=12, ssl=False)
+        connector = aiohttp.TCPConnector(limit=12)
         timeout = aiohttp.ClientTimeout(total=9, connect=4, sock_connect=4, sock_read=8)
 
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-            t1, t2, t3 = await asyncio.gather(
+            t0, t1, t2, t3 = await asyncio.gather(
+                tier0_ddgs_images(query, limit),
                 tier1_wikipedia_thumbnails(session, query, limit),
                 tier2_wikimedia_commons(session, query, limit),
                 tier3_duckduckgo_instant(session, query),
                 return_exceptions=True
             )
 
-        for result in [t1, t2, t3]:
+        for result in [t0, t1, t2, t3]:
             if isinstance(result, list):
                 all_urls.extend(result)
 

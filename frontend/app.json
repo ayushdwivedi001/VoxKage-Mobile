@@ -49,7 +49,14 @@
           "position": "absolute",
           "backgroundColor": "#00000000"
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow VoxKage to access your microphone to record voice instructions, Sir."
+        }
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
