@@ -480,11 +480,15 @@ interface ImageWithLoaderProps {
   alt: string;
   style: any;
   resizeMode?: 'cover' | 'contain' | 'stretch';
+  // Explicit pixel dimensions for React Native native compatibility
+  // (percentage heights collapse to 0 on native without an explicit parent height)
+  width?: number;
+  height?: number;
   onPress?: () => void;
   onError?: () => void;
 }
 
-function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress, onError: onErrorProp }: ImageWithLoaderProps) {
+function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', width, height, onPress, onError: onErrorProp }: ImageWithLoaderProps) {
   const isBase64 = uri && uri.startsWith('data:image/');
   const [loading, setLoading] = useState(!isBase64);
   const [error, setError] = useState(false);
@@ -539,13 +543,28 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress, onErr
     }
   }
 
+  // Build the wrapper dimensions: prefer explicit pixel sizes (critical for RN native)
+  // because percentage-based height (e.g. '100%') collapses to 0 without an explicit parent height.
+  const wrapperStyle: any[] = [styles.imageWrapper];
+  if (width !== undefined) wrapperStyle.push({ width });
+  if (height !== undefined) wrapperStyle.push({ height });
+  // Only apply the incoming `style` if it is not percentage-based
+  if (style && typeof style === 'object' && !Array.isArray(style) && style.height !== '100%' && style.width !== '100%') {
+    wrapperStyle.push(style);
+  }
+
+  // The actual image fills the wrapper via flex — no absolute positioning needed on native
+  const imgStyle: any = { flex: 1, width: '100%' };
+  if (width !== undefined) imgStyle.width = width;
+  if (height !== undefined) imgStyle.height = height;
+
   return (
-    <TouchableOpacity onPress={onPress} disabled={loading || error || !onPress} style={style}>
-      <View style={[styles.imageWrapper, style]}>
+    <TouchableOpacity onPress={onPress} disabled={loading || error || !onPress} style={wrapperStyle}>
+      <View style={wrapperStyle}>
         {!error ? (
           <Image
             source={isBase64 ? { uri: resolvedUri } : { uri: resolvedUri, headers }}
-            style={[style, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}
+            style={imgStyle}
             resizeMode={resizeMode}
             onLoadStart={isBase64 ? undefined : () => {
               // Only set loading=true on the FIRST load start, never on re-renders
@@ -698,15 +717,19 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
           }
         }}
         scrollEventThrottle={200}
-        style={styles.carouselScroll}
+        style={[styles.carouselScroll, { height: 180 }]}
       >
         {/* Only render validUrls — failed images are removed from the DOM entirely */}
         {validUrls.map((url, idx) => (
-          <View key={`img-slide-${url}`} style={{ width: containerWidth, height: 180 }}>
+          // Explicit pixel width & height on the slide AND ImageWithLoader — critical for RN native
+          // On native, percentage sizes collapse to 0 without a parent with explicit dimensions.
+          <View key={`img-slide-${url}`} style={{ width: containerWidth, height: 180, overflow: 'hidden' }}>
             <ImageWithLoader
               uri={url}
               alt={`Slide ${idx + 1}`}
               style={styles.carouselImage}
+              width={containerWidth}
+              height={180}
               resizeMode="cover"
               onPress={onPressImage ? () => onPressImage(url, `Slide ${idx + 1}`) : undefined}
               onError={() => handleImageError(url)}
@@ -2045,16 +2068,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#171717',
-    backgroundColor: '#000000',
+    backgroundColor: '#0a0a0a',
     overflow: 'hidden',
+    // Explicit minHeight so native renders the container even before onLayout fires
+    minHeight: 180,
   },
   carouselScroll: {
     width: '100%',
-    height: 180,
+    // Height set inline as 180 — do NOT use '100%' here, collapses on native
   },
   carouselImage: {
+    // width/height set explicitly via props in ImageWithLoader — '100%' fails on native
     width: '100%',
-    height: '100%',
+    height: 180,
   },
   carouselDots: {
     flexDirection: 'row',
@@ -2262,12 +2288,13 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   imageWrapper: {
-    position: 'relative',
-    height: 200,
-    width: '100%',
-    backgroundColor: '#000000',
+    // Do NOT use position:'relative' — unsupported in RN StyleSheet; defaults to static on native.
+    // Dimensions are set inline via width/height props per usage context.
+    backgroundColor: '#0a0a0a',
     borderRadius: 8,
     overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   markdownImage: {
     width: '100%',
