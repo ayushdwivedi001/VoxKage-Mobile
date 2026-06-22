@@ -390,8 +390,52 @@ async def fetch_images_for_query(query: str, limit: int = 5) -> str:
     # Final pass: validate, deduplicate, prioritize Wikimedia CDN
     final_urls = validate_and_deduplicate(all_urls, limit)
 
-    if not final_urls:
+    # Validate image existence to filter out deleted/missing (404) URLs from Wikimedia/Wikipedia
+    verified_urls = []
+    if final_urls:
+        try:
+            import aiohttp
+            async def _verify_one(session, url):
+                headers = {"User-Agent": "VoxKage/2.0 (https://voxkage.ai; contact@voxkage.ai) python-aiohttp"}
+                try:
+                    async with session.head(url, headers=headers, timeout=2.0, allow_redirects=True) as resp:
+                        if resp.status == 200:
+                            return url, True
+                        # Some sites return 405 Method Not Allowed or 403 for HEAD, try GET
+                        if resp.status in (405, 403, 401, 301, 302):
+                            async with session.get(url, headers=headers, timeout=2.0) as gresp:
+                                return url, gresp.status == 200
+                        print(f"[fetch_images] verification HEAD failed ({resp.status}) for: {url}")
+                except Exception as e:
+                    # Fallback to GET on exception
+                    try:
+                        async with session.get(url, headers=headers, timeout=2.0) as gresp:
+                            return url, gresp.status == 200
+                    except Exception as ge:
+                        print(f"[fetch_images] verification GET fallback failed for {url}: {ge}")
+                return url, False
+
+            async with aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(limit=10),
+                timeout=aiohttp.ClientTimeout(total=4.0)
+            ) as verify_session:
+                tasks = [_verify_one(verify_session, u) for u in final_urls]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in results:
+                    if isinstance(res, tuple):
+                        url, is_ok = res
+                        if is_ok:
+                            verified_urls.append(url)
+                        else:
+                            print(f"[fetch_images] Filtered out dead URL (404/error): {url}")
+        except Exception as e:
+            print(f"[fetch_images] URL verification process crashed: {e}")
+            verified_urls = final_urls
+    else:
+        verified_urls = final_urls
+
+    if not verified_urls:
         return "Error: No images found. The image APIs returned no results for this query."
 
-    print(f"[fetch_images] Returning {len(final_urls)} validated URLs for: '{query}'")
-    return ",".join(final_urls)
+    print(f"[fetch_images] Returning {len(verified_urls)} validated URLs for: '{query}'")
+    return ",".join(verified_urls)
