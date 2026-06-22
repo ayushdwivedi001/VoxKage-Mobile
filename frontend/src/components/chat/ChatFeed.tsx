@@ -226,7 +226,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   <View style={styles.assistantAvatar}>
                     <Image 
                       source={require('@/assets/images/android-icon-foreground.png')} 
-                      style={{ width: 28, height: 28 }}
+                      style={{ width: 38, height: 38 }}
                       contentFit="contain"
                     />
                   </View>
@@ -318,8 +318,8 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                     <View style={styles.assistantActionsRow}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                         <Image 
-                          source={require('@/assets/images/android-icon-foreground.png')} 
-                          style={{ width: 18, height: 18 }}
+                          source={require('@/assets/images/icon.png')} 
+                          style={{ width: 34, height: 34 }}
                           contentFit="contain"
                         />
                         <TouchableOpacity 
