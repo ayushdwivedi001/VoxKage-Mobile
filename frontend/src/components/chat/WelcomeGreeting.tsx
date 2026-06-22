@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text } from 'react-native';
-import { LogoV } from './LogoV';
+import { Image } from 'expo-image';
 import { styles } from './styles';
 import { replaceSir } from '@/utils/settings';
 
@@ -32,7 +32,11 @@ export const WelcomeGreeting: React.FC = () => {
 
   return (
     <View style={styles.welcomeContainer}>
-      <LogoV size={72} />
+      <Image 
+        source={require('@/assets/images/android-icon-foreground.png')} 
+        style={{ width: 72, height: 72 }}
+        contentFit="contain"
+      />
       <Text style={styles.welcomeText}>{replaceSir(greeting)}</Text>
     </View>
   );

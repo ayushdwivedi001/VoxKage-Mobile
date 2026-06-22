@@ -1,8 +1,8 @@
 import React from 'react';
-import { FlatList, View, Text, TouchableOpacity, ActivityIndicator, Clipboard, Animated, Image } from 'react-native';
+import { FlatList, View, Text, TouchableOpacity, ActivityIndicator, Clipboard, Animated } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
-import { LogoV } from './LogoV';
 import { styles } from './styles';
 import { selectBestVoice, cleanTextForSpeech } from '@/utils/mobileTools';
 import { ToolWorkflowPath, WorkflowNode } from './ToolWorkflowPath';
@@ -221,7 +221,11 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             return (
               <View style={styles.assistantBubbleWrapper}>
                 <View style={styles.assistantAvatar}>
-                  <LogoV size={18} />
+                  <Image 
+                    source={require('@/assets/images/icon.png')} 
+                    style={{ width: 18, height: 18, borderRadius: 4 }}
+                    contentFit="contain"
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
                   {/* Collapsible Thinking Accordion Header */}

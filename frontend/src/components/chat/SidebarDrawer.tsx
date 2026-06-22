@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, TextInput, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogoV } from './LogoV';
+import { Image } from 'expo-image';
 import { styles } from './styles';
 
 export interface ChatSession {
@@ -74,7 +74,11 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       )}
       <Animated.View style={[styles.sidebarDrawer, { left: sidebarAnim }, Platform.OS !== 'web' && { paddingTop: insets.top, paddingBottom: insets.bottom || (Platform.OS === 'android' ? 32 : 0) }]}>
         <View style={styles.sidebarHeader}>
-          <LogoV size={24} />
+          <Image 
+            source={require('@/assets/images/android-icon-foreground.png')} 
+            style={{ width: 24, height: 24 }}
+            contentFit="contain"
+          />
           <Text style={styles.sidebarTitle}>VoxKage</Text>
           <TouchableOpacity onPress={onClose}>
             <Ionicons name="close-outline" size={22} color="#9ca3af" />
