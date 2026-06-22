@@ -1727,4 +1727,32 @@ export const styles = StyleSheet.create({
       color: '#64748b',
       fontSize: 11,
     },
+    voicePopup: {
+      alignSelf: 'center',
+      backgroundColor: '#0a101f',
+      borderColor: 'rgba(59, 130, 246, 0.4)',
+      borderWidth: 1.2,
+      borderRadius: 16,
+      paddingVertical: 6,
+      paddingHorizontal: 16,
+      marginBottom: 8,
+      ...Platform.select({
+        web: {
+          boxShadow: '0 0 12px rgba(59, 130, 246, 0.35)',
+        } as any,
+        default: {
+          shadowColor: '#3b82f6',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.4,
+          shadowRadius: 6,
+          elevation: 4,
+        },
+      }),
+    },
+    voicePopupText: {
+      color: '#60a5fa',
+      fontSize: 12.5,
+      fontWeight: '600',
+      letterSpacing: -0.2,
+    },
   });

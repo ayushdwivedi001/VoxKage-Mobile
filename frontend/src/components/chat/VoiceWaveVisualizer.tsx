@@ -4,9 +4,14 @@ import { View, Animated, StyleSheet, Easing } from 'react-native';
 interface VoiceWaveVisualizerProps {
   active: boolean;
   volume?: number;
+  inline?: boolean;
 }
 
-export const VoiceWaveVisualizer: React.FC<VoiceWaveVisualizerProps> = ({ active, volume = 0.0 }) => {
+export const VoiceWaveVisualizer: React.FC<VoiceWaveVisualizerProps> = ({ 
+  active, 
+  volume = 0.0,
+  inline = false 
+}) => {
   // Initialize animations to 0.0 so that their baseline contribution is zero
   const animations = useRef(Array.from({ length: 9 }, () => new Animated.Value(0.0))).current;
   const volumeAnim = useRef(new Animated.Value(0.0)).current;
@@ -73,7 +78,7 @@ export const VoiceWaveVisualizer: React.FC<VoiceWaveVisualizerProps> = ({ active
   ];
 
   return (
-    <View style={styles.waveContainer}>
+    <View style={inline ? styles.inlineContainer : styles.waveContainer}>
       {animations.map((anim, index) => {
         // scaleY = baseline (0.15) + (anim * volumeAnim * 1.5)
         // This guarantees that if volumeAnim is 0, scaleY is exactly 0.15 (completely flat/stopped bars).
@@ -87,7 +92,7 @@ export const VoiceWaveVisualizer: React.FC<VoiceWaveVisualizerProps> = ({ active
           <Animated.View
             key={index}
             style={[
-              styles.waveBar,
+              inline ? styles.inlineBar : styles.waveBar,
               {
                 backgroundColor: colors[index],
                 transform: [{ scaleY }],
@@ -114,5 +119,18 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 3,
     marginHorizontal: 3.5,
+  },
+  inlineContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 36,
+    width: '100%',
+  },
+  inlineBar: {
+    width: 3,
+    height: 20,
+    borderRadius: 1.5,
+    marginHorizontal: 1.5,
   },
 });

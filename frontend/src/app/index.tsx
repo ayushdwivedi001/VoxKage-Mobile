@@ -307,9 +307,6 @@ export default function ChatScreen() {
     backendUrl,
     token,
     webSocket.setInputText,
-    webSocket.setLoading,
-    webSocket.setThinkingStatus,
-    handleSendMessageRef,
     showAlert,
     performUpload
   );
@@ -733,6 +730,8 @@ export default function ChatScreen() {
           handleFileUpload={mediaPickers.handleFileUpload}
           handleVoicePress={voiceLoop.handleVoicePress}
           isVoiceActive={voiceLoop.isVoiceActive}
+          isTranscribing={voiceLoop.isTranscribing}
+          micVolume={voiceLoop.micVolume}
           uploadingFile={loading}
           loading={loading}
           showBtwOverlay={webSocket.showBtwOverlay}
@@ -785,14 +784,6 @@ export default function ChatScreen() {
         onToggleFavorite={handleToggleFavorite}
       />
 
-      {/* Voice pulse overlay */}
-      {voiceLoop.isVoiceActive && (
-        <View style={styles.voiceOverlay}>
-          <Text style={styles.voiceTitle}>Listening...</Text>
-          <VoiceWaveVisualizer active={voiceLoop.isVoiceActive} volume={voiceLoop.micVolume} />
-          <Text style={styles.voiceSubtitle}>{replaceSir('Speak your instruction, Sir')}</Text>
-        </View>
-      )}
 
       {/* Sidebar Drawer */}
       <SidebarDrawer

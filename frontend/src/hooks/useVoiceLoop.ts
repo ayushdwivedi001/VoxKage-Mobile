@@ -1,13 +1,10 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAudioRecorder, RecordingPresets, AudioModule, useAudioRecorderState } from 'expo-audio';
 
 export function useVoiceLoop(
   backendUrl: string,
   token: string | null,
   setInputText: React.Dispatch<React.SetStateAction<string>>,
-  setLoading: React.Dispatch<React.SetStateAction<boolean>>,
-  setThinkingStatus: React.Dispatch<React.SetStateAction<string | null>>,
-  handleSendMessageRef: React.MutableRefObject<((overrideText?: string) => Promise<void>) | null>,
   showAlert: (title: string, message: string) => void,
   performUpload: (
     url: string,
@@ -19,6 +16,7 @@ export function useVoiceLoop(
   ) => Promise<any>
 ) {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [micVolume, setMicVolume] = useState(0.1);
 
   // Initialize the recorder with high quality and metering enabled
@@ -43,22 +41,18 @@ export function useVoiceLoop(
   }, [recorderState.isRecording]);
 
   const transcribeAudio = async (uri: string) => {
-    setThinkingStatus('Transcribing voice prompt, Sir...');
-    setLoading(true);
+    setIsTranscribing(true);
     try {
       const url = `${backendUrl}/voice/transcribe`;
       const mimeType = 'audio/m4a';
       const res = await performUpload(url, uri, 'voice_input.m4a', mimeType, token || '');
       if (res && res.text) {
         setInputText(res.text);
-        // Automatically submit the message
-        handleSendMessageRef.current?.(res.text);
       }
     } catch (e: any) {
       showAlert('Voice Transcription Failed', `Failed to transcribe: ${e.message}`);
     } finally {
-      setLoading(false);
-      setThinkingStatus(null);
+      setIsTranscribing(false);
     }
   };
 
@@ -113,6 +107,7 @@ export function useVoiceLoop(
 
   return {
     isVoiceActive,
+    isTranscribing,
     micVolume,
     handleVoicePress,
   };

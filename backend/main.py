@@ -1,5 +1,8 @@
 import os
 import json
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -1012,14 +1015,39 @@ async def transcribe_voice(
     user: str = Depends(get_current_user)
 ):
     """
-    Receives voice recording (M4A) and transcribes it using Hugging Face's Whisper model.
+    Receives voice recording (M4A) and transcribes it using Groq or Hugging Face Whisper.
     """
     file_path = save_upload(file)
     try:
         import requests
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        
+        # 1. Attempt Groq transcription if key is set
+        if groq_api_key:
+            try:
+                url = "https://api.groq.com/openai/v1/audio/transcriptions"
+                headers = {"Authorization": f"Bearer {groq_api_key}"}
+                with open(file_path, "rb") as f:
+                    files = {"file": ("voice_input.m4a", f, "audio/m4a")}
+                    data = {"model": "whisper-large-v3"}
+                    response = requests.post(url, headers=headers, files=files, data=data, timeout=20)
+                
+                if response.status_code == 200:
+                    transcribed_text = response.json().get("text", "").strip()
+                    delete_file(file_path)
+                    return {"text": transcribed_text}
+                else:
+                    print(f"[Voice] Groq transcription API error (status {response.status_code}): {response.text}")
+            except Exception as groq_err:
+                print(f"[Voice] Groq transcription failed: {groq_err}. Falling back to Hugging Face.")
+
+        # 2. Fallback to Hugging Face Inference API
         hf_token = os.getenv("HF_TOKEN")
         if not hf_token:
-            raise HTTPException(status_code=500, detail="HF_TOKEN environment key is missing on backend, Sir.")
+            raise HTTPException(
+                status_code=500, 
+                detail="GROQ_API_KEY and HF_TOKEN environment keys are missing on backend, Sir."
+            )
             
         url = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
         headers = {"Authorization": f"Bearer {hf_token}"}
@@ -1027,13 +1055,11 @@ async def transcribe_voice(
         with open(file_path, "rb") as f:
             audio_bytes = f.read()
             
-        # Send raw audio bytes to Hugging Face Inference API
         response = requests.post(url, headers=headers, data=audio_bytes, timeout=30)
         
         if response.status_code == 200:
             res_data = response.json()
             transcribed_text = res_data.get("text", "").strip()
-            # Clean up local file
             delete_file(file_path)
             return {"text": transcribed_text}
         else:
@@ -1041,6 +1067,7 @@ async def transcribe_voice(
     except Exception as e:
         delete_file(file_path)
         raise HTTPException(status_code=500, detail=f"Failed to transcribe audio prompt: {str(e)}")
+
 
 # --- WebSocket Chat Streaming Server ---
 

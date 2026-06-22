@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, TextInput, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from './styles';
+import { VoiceWaveVisualizer } from './VoiceWaveVisualizer';
 
 const renderHighlightedText = (text: string) => {
   if (!text) return null;
@@ -42,6 +43,8 @@ interface ChatInputProps {
   handleFileUpload: () => void;
   handleVoicePress: () => void;
   isVoiceActive: boolean;
+  isTranscribing?: boolean;
+  micVolume?: number;
   uploadingFile: boolean;
   loading: boolean;
   activeModel: string;
@@ -77,6 +80,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   handleFileUpload,
   handleVoicePress,
   isVoiceActive,
+  isTranscribing = false,
+  micVolume = 0.0,
   uploadingFile,
   loading,
   activeModel,
@@ -337,6 +342,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </View>
       )}
 
+      {/* Floating Speech Popup Banner */}
+      {isVoiceActive && (
+        <View style={styles.voicePopup}>
+          <Text style={styles.voicePopupText}>Start speaking your query</Text>
+        </View>
+      )}
+
       <View style={styles.inputPill}>
         <TouchableOpacity
           onPress={() => setShowMediaPopover(!showMediaPopover)}
@@ -350,39 +362,65 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           )}
         </TouchableOpacity>
 
-        <TextInput
-          style={[
-            styles.inputField,
-            { height: Math.max(Platform.OS === 'web' ? 40 : 36, Math.min(150, inputHeight)) }
-          ]}
-          placeholder="Ask VoxKage, type / for commands"
-          placeholderTextColor="#475569"
-          value={inputText}
-          onChangeText={(text) => {
-            setInputText(text);
-            if (!text) {
-              setInputHeight(Platform.OS === 'web' ? 40 : 36);
-            }
-          }}
-          multiline={true}
-          onKeyPress={onKeyPress}
-          onContentSizeChange={(e) => {
-            const h = e.nativeEvent.contentSize.height;
-            if (h > 0) {
-              setInputHeight(h);
-            }
-          }}
-        />
-
-        <TouchableOpacity onPress={handleVoicePress} style={styles.inputVoiceBtn}>
-          <Ionicons
-            name={isVoiceActive ? 'mic' : 'mic-outline'}
-            size={20}
-            color={isVoiceActive ? '#ef4444' : '#94a3b8'}
+        {isVoiceActive ? (
+          <View style={{ flex: 1, height: 36, justifyContent: 'center', alignItems: 'center' }}>
+            <VoiceWaveVisualizer active={isVoiceActive} volume={micVolume} inline={true} />
+          </View>
+        ) : (
+          <TextInput
+            style={[
+              styles.inputField,
+              { height: Math.max(Platform.OS === 'web' ? 40 : 36, Math.min(150, inputHeight)) }
+            ]}
+            placeholder={isTranscribing ? "Transcribing voice query, Sir..." : "Ask VoxKage, type / for commands"}
+            placeholderTextColor="#475569"
+            value={inputText}
+            editable={!isTranscribing}
+            onChangeText={(text) => {
+              setInputText(text);
+              if (!text) {
+                setInputHeight(Platform.OS === 'web' ? 40 : 36);
+              }
+            }}
+            multiline={true}
+            onKeyPress={onKeyPress}
+            onContentSizeChange={(e) => {
+              const h = e.nativeEvent.contentSize.height;
+              if (h > 0) {
+                setInputHeight(h);
+              }
+            }}
           />
-        </TouchableOpacity>
+        )}
 
-        {loading && !isBtwActive ? (
+        {isTranscribing ? (
+          <View style={styles.inputVoiceBtn}>
+            <ActivityIndicator size="small" color="#3b82f6" />
+          </View>
+        ) : (
+          <TouchableOpacity onPress={handleVoicePress} style={styles.inputVoiceBtn}>
+            <Ionicons
+              name={isVoiceActive ? 'mic' : 'mic-outline'}
+              size={20}
+              color={isVoiceActive ? '#3b82f6' : '#94a3b8'}
+            />
+          </TouchableOpacity>
+        )}
+
+        {isVoiceActive ? (
+          <TouchableOpacity
+            onPress={handleVoicePress}
+            style={styles.inputSendBtn}
+          >
+            <View style={[styles.sendCircle, { backgroundColor: '#ef4444' }]}>
+              <Ionicons
+                name="square"
+                size={12}
+                color="#ffffff"
+              />
+            </View>
+          </TouchableOpacity>
+        ) : loading && !isBtwActive ? (
           <TouchableOpacity
             onPress={handleStopGeneration}
             style={styles.inputSendBtn}
