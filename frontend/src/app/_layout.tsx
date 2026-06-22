@@ -7,7 +7,16 @@ import { useEffect } from 'react';
 export default function RootLayout() {
   useEffect(() => {
     if (Platform.OS === 'android') {
-      NavigationBar.setPositionAsync('absolute');
+      const NavSys = NavigationBar as any;
+      if (typeof NavSys?.setPositionAsync === 'function') {
+        NavSys.setPositionAsync('absolute').catch(() => {});
+      }
+      if (typeof NavSys?.setBackgroundColorAsync === 'function') {
+        NavSys.setBackgroundColorAsync('#00000000').catch(() => {});
+      }
+      if (typeof NavSys?.setButtonStyleAsync === 'function') {
+        NavSys.setButtonStyleAsync('light').catch(() => {});
+      }
     }
   }, []);
 

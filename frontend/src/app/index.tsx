@@ -642,7 +642,7 @@ export default function ChatScreen() {
           styles.mainWrapper,
           Platform.OS !== 'web' && {
             paddingTop: insets.top,
-            paddingBottom: insets.bottom || (Platform.OS === 'android' ? 32 : 0),
+            paddingBottom: insets.bottom,
           },
         ]}
       >

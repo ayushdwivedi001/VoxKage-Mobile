@@ -255,8 +255,8 @@ export const styles = StyleSheet.create({
     color: '#f8fafc',
     fontSize: 14.5,
     paddingHorizontal: 8,
-    paddingTop: Platform.OS === 'web' ? 8 : 6,
-    paddingBottom: Platform.OS === 'web' ? 8 : 6,
+    paddingTop: Platform.OS === 'web' ? 8 : (Platform.OS === 'ios' ? 8 : 4),
+    paddingBottom: Platform.OS === 'web' ? 8 : (Platform.OS === 'ios' ? 8 : 4),
     maxHeight: 150,
     ...Platform.select({
       web: {

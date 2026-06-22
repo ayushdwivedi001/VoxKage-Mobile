@@ -355,7 +355,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             styles.inputField,
             { height: Math.max(Platform.OS === 'web' ? 40 : 36, Math.min(150, inputHeight)) }
           ]}
-          placeholder="Ask VoxKage.. , / for command actions"
+          placeholder="Ask VoxKage, type / for commands"
           placeholderTextColor="#475569"
           value={inputText}
           onChangeText={(text) => {

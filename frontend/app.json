@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "VoxKage",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,21 +14,10 @@
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.shinayush.voxkage"
-    },
-    "androidNavigationBar": {
-      "backgroundColor": "#00000000",
-      "barStyle": "light-content",
-      "enforceContrast": false
-    },
-    "androidStatusBar": {
-      "backgroundColor": "#00000000",
-      "translucent": true,
-      "barStyle": "light-content"
     },
     "web": {
       "output": "static",
@@ -53,7 +42,14 @@
           "backgroundColor": "#000000"
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-navigation-bar",
+        {
+          "position": "absolute",
+          "backgroundColor": "#00000000"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
