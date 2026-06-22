@@ -481,9 +481,10 @@ interface ImageWithLoaderProps {
   style: any;
   resizeMode?: 'cover' | 'contain' | 'stretch';
   onPress?: () => void;
+  onError?: () => void;
 }
 
-function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress }: ImageWithLoaderProps) {
+function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress, onError: onErrorProp }: ImageWithLoaderProps) {
   const isBase64 = uri && uri.startsWith('data:image/');
   const [loading, setLoading] = useState(!isBase64);
   const [error, setError] = useState(false);
@@ -539,6 +540,7 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', onPress }: Ima
             onError={() => {
               setError(true);
               setLoading(false);
+              if (onErrorProp) onErrorProp();
             }}
           />
         ) : (
@@ -628,11 +630,23 @@ function MarkdownImage({ uri, alt, onPressImage }: MarkdownImageProps) {
 
 // --- Image & Gallery Swipable Carousel Component ---
 function CarouselComponent({ imagesString, onPressImage }: { imagesString: string; onPressImage?: (uri: string, alt?: string) => void }) {
-  const imageUrls = imagesString.split(',').map(url => url.trim()).filter(url => url);
+  // Validate and filter URLs before rendering — prevents broken slide errors
+  const BLOCKED = ["data:image", ".svg", ".ogg", ".pdf", ".tiff", "bing.com/th", "encrypted-tbn", "gstatic.com"];
+  const rawUrls = imagesString.split(',').map(url => url.trim()).filter(url => {
+    if (!url || !url.startsWith('https://')) return false;
+    const lower = url.toLowerCase();
+    if (BLOCKED.some(b => lower.includes(b))) return false;
+    return true;
+  });
+
   const [activeIndex, setActiveIndex] = useState(0);
   const [containerWidth, setContainerWidth] = useState(280);
+  // Track which slide indices have failed to load (hide them silently)
+  const [failedIndices, setFailedIndices] = useState<Set<number>>(new Set());
 
-  if (imageUrls.length === 0) return null;
+  const validUrls = rawUrls.filter((_, idx) => !failedIndices.has(idx));
+
+  if (rawUrls.length === 0) return null;
 
   return (
     <View
@@ -655,28 +669,33 @@ function CarouselComponent({ imagesString, onPressImage }: { imagesString: strin
         scrollEventThrottle={200}
         style={styles.carouselScroll}
       >
-        {imageUrls.map((url, idx) => (
-          <View key={`img-slide-${idx}`} style={{ width: containerWidth, height: 180 }}>
+        {rawUrls.map((url, idx) => (
+          <View key={`img-slide-${idx}`} style={{ width: containerWidth, height: 180, display: failedIndices.has(idx) ? 'none' : 'flex' }}>
             <ImageWithLoader
               uri={url}
               alt={`Slide ${idx + 1}`}
-              style={styles.carouselImage}
+              style={[styles.carouselImage, failedIndices.has(idx) ? { display: 'none' } : {}]}
               resizeMode="cover"
               onPress={onPressImage ? () => onPressImage(url, `Slide ${idx + 1}`) : undefined}
+              onError={() => {
+                setFailedIndices(prev => new Set([...prev, idx]));
+              }}
             />
           </View>
         ))}
       </ScrollView>
-      {imageUrls.length > 1 ? (
+      {rawUrls.length > 1 ? (
         <View style={styles.carouselDots}>
-          {imageUrls.map((_, idx) => (
-            <View
-              key={`dot-${idx}`}
-              style={[
-                styles.carouselDot,
-                idx === activeIndex && styles.carouselDotActive
-              ]}
-            />
+          {rawUrls.map((_, idx) => (
+            failedIndices.has(idx) ? null : (
+              <View
+                key={`dot-${idx}`}
+                style={[
+                  styles.carouselDot,
+                  idx === activeIndex && styles.carouselDotActive
+                ]}
+              />
+            )
           ))}
         </View>
       ) : null}

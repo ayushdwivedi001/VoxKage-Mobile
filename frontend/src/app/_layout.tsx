@@ -1,8 +1,16 @@
 import { Stack } from 'expo-router';
 import { StyleSheet, View, Platform, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as NavigationBar from 'expo-navigation-bar';
+import { useEffect } from 'react';
 
 export default function RootLayout() {
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      NavigationBar.setPositionAsync('absolute');
+    }
+  }, []);
+
   // If previewing in Web, wrap in a gorgeous centered phone frame to look like a mobile app
   if (Platform.OS === 'web') {
     return (

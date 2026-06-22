@@ -407,7 +407,7 @@ async def execute_tool_call_v2(
         tool_output = ""
     
         # --- Route Search and Fetch Tools ---
-        if name in {"web_search", "web_fetch", "web_search_parallel", "web_fetch_parallel", "web_search_deep", "fetch_images_for_query"}:
+        if name in {"web_search", "web_fetch", "web_search_parallel", "web_fetch_parallel", "web_search_deep"}:
             announcement = ""
             if name == "web_search":
                 announcement = f"Searching the web for: '{args.get('query', '')}'..."
@@ -419,8 +419,7 @@ async def execute_tool_call_v2(
                 announcement = f"Fetching multiple web pages in parallel..."
             elif name == "web_search_deep":
                 announcement = f"Performing deep search and fetching web contents for: '{args.get('query', '')}'..."
-            elif name == "fetch_images_for_query":
-                announcement = f"Searching for authentic source images: {args.get('query', '')}..."
+
 
             if announcement:
                 await send_to_client({"type": "hud_log", "content": announcement})
@@ -553,10 +552,14 @@ async def execute_tool_call_v2(
                         for r in deep_res:
                             if isinstance(r, dict) and r.get("url") and "error" not in r:
                                 tool_context["consulted_sources"].append({"title": r.get("title") or r.get("url"), "url": r.get("url")})
-                elif name == "fetch_images_for_query":
-                    q = args.get("query", "")
-                    lim = args.get("limit", 5)
-                    tool_output = fetch_images_for_query(q, lim)
+        # --- fetch_images_for_query: Direct server-side async execution ---
+        # Wikipedia/Wikimedia/DDG Instant APIs are public and work reliably from any IP.
+        # Never routed through laptop/mobile bridge (bridge doesn't implement this function).
+        elif name == "fetch_images_for_query":
+            q = args.get("query", "")
+            lim = args.get("limit", 5)
+            await send_to_client({"type": "hud_log", "content": f"Fetching authentic images for: '{q}'..."})
+            tool_output = await fetch_images_for_query(q, lim)
 
         # --- All Other Tools ---
         else:
@@ -1324,7 +1327,7 @@ async def _run_agentic_loop_impl(
 
     messages.append({"role": "user", "content": user_message_content})
 
-    max_iterations = 12
+    max_iterations = 20
     for iteration in range(max_iterations):
         payload = {
             "model": model_id,

@@ -76,8 +76,8 @@ async def run_subagent_loop(
     assistant_text = ""
     
     try:
-        # Run the agentic loop (up to 12 turns)
-        for turn in range(12):
+        # Run the agentic loop (up to 20 turns)
+        for turn in range(20):
             model_id = get_opencode_model(model_key)
             payload = {
                 "model": model_id,
@@ -89,7 +89,7 @@ async def run_subagent_loop(
             current_tool_calls = []
             assistant_text = ""
             
-            await on_status_update(f"Running agent turn {turn + 1}/12...")
+            await on_status_update(f"Running agent turn {turn + 1}/20...")
             
             # Stream proxy request
             async for delta in query_opencode_proxy(payload, manager, user_id, client_websocket=laptop_ws):

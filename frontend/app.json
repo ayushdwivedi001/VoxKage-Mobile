@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.shinayush.voxkage"
     },
     "androidNavigationBar": {
       "backgroundColor": "#00000000",
@@ -57,6 +58,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": false
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "bc4b280c-18fc-447d-ab6d-d78b0ff8f5e2"
+      }
     }
   }
 }
