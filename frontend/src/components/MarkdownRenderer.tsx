@@ -4,59 +4,95 @@ import { Image } from 'expo-image';
 
 // --- Dedicated Static Require Helpers to prevent Metro build/compilation errors ---
 const getFileSystem = () => {
-  try { return require('expo-file-system'); } catch { return null; }
+  try { return require('expo-file-system/legacy'); } catch {
+    try { return require('expo-file-system'); } catch { return null; }
+  }
 };
 const getMediaLibrary = () => {
-  try { return require('expo-media-library'); } catch { return null; }
+  try {
+    const { requireNativeModule } = require('expo-modules-core');
+    if (requireNativeModule('ExpoMediaLibraryNext')) {
+      return require('expo-media-library');
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+const getSharing = () => {
+  try { return require('expo-sharing'); } catch { return null; }
 };
 
-const saveImageToGallery = async (uri: string) => {
+const exportImage = async (uri: string) => {
   try {
     const FileSystem = getFileSystem();
-    const MediaLibrary = getMediaLibrary();
-
-    if (!FileSystem || !MediaLibrary) {
+    if (!FileSystem) {
       Clipboard.setString(uri);
       if (Platform.OS === 'android') {
-        ToastAndroid.show('Image link/data copied to clipboard, Sir', ToastAndroid.SHORT);
+        ToastAndroid.show('Image link copied to clipboard', ToastAndroid.SHORT);
       } else {
-        Alert.alert('Success', 'Image link/data copied to clipboard, Sir.');
+        Alert.alert('Success', 'Image link copied to clipboard.');
       }
-      return;
-    }
-
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Denied', 'Permission to access media library was denied, Sir.');
       return;
     }
 
     let fileUri = '';
     if (uri.startsWith('data:image/')) {
+      const match = uri.match(/^data:image\/(\w+);base64,/);
+      const ext = match ? match[1] : 'png';
+      const filename = `voxkage_${Date.now()}.${ext}`;
       const base64Data = uri.replace(/^data:image\/\w+;base64,/, '');
-      const filename = `matplotlib_${Date.now()}.png`;
       fileUri = `${FileSystem.cacheDirectory}${filename}`;
       await FileSystem.writeAsStringAsync(fileUri, base64Data, {
         encoding: FileSystem.EncodingType.Base64,
       });
     } else {
-      const filename = `matplotlib_${Date.now()}.png`;
+      let filename = `voxkage_${Date.now()}.png`;
+      try {
+        const urlObj = new URL(uri);
+        const pathname = urlObj.pathname;
+        const parts = pathname.split('/');
+        const lastPart = parts[parts.length - 1];
+        if (lastPart && lastPart.includes('.')) {
+          const cleanName = lastPart.split('?')[0].split('#')[0];
+          if (cleanName && cleanName.length > 3) {
+            filename = cleanName;
+          }
+        }
+      } catch {}
       fileUri = `${FileSystem.cacheDirectory}${filename}`;
-      const { uri: localUri } = await FileSystem.downloadAsync(uri, fileUri);
+      const { uri: localUri } = await FileSystem.downloadAsync(uri, fileUri, {
+        headers: {
+          'User-Agent': 'VoxKageMobile/1.0 (https://voxkage.vercel.app/; ayushdwivedi2049@gmail.com)'
+        }
+      });
       fileUri = localUri;
     }
 
-    await MediaLibrary.createAssetAsync(fileUri);
-    if (Platform.OS === 'android') {
-      ToastAndroid.show('Image saved to Gallery, Sir!', ToastAndroid.SHORT);
+    const Sharing = getSharing();
+    if (Sharing && (await Sharing.isAvailableAsync())) {
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Opening sharing options', ToastAndroid.SHORT);
+      }
+      await Sharing.shareAsync(fileUri, {
+        dialogTitle: 'Export Image',
+        UTI: 'public.png',
+      });
     } else {
-      Alert.alert('Saved', 'Image saved to Gallery, Sir!');
+      // Ultimate fallback: copy link
+      Clipboard.setString(uri);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Could not export image. Link copied to clipboard', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Success', 'Could not export image. Link copied to clipboard.');
+      }
     }
   } catch (err: any) {
-    console.error('Failed to save image:', err);
-    Alert.alert('Error', `Failed to save image, Sir. Error: ${err.message}`);
+    console.error('Failed to export image:', err);
+    Alert.alert('Error', `Failed to export image. Error: ${err.message}`);
   }
 };
+
 
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
@@ -664,11 +700,11 @@ function MarkdownImage({ uri, alt, onPressImage }: MarkdownImageProps) {
           </TouchableOpacity>
         )}
         <TouchableOpacity 
-          onPress={() => saveImageToGallery(resolvedUri)} 
+          onPress={() => exportImage(resolvedUri)} 
           style={[styles.imageCardActionBtn, styles.imageCardActionBtnPrimary]}
         >
-          <Ionicons name="download-outline" size={13} color="#60a5fa" />
-          <Text style={[styles.imageCardActionText, styles.imageCardActionTextPrimary]}>Save to Gallery</Text>
+          <Ionicons name="share-social-outline" size={13} color="#60a5fa" />
+          <Text style={[styles.imageCardActionText, styles.imageCardActionTextPrimary]}>Export Image</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -1308,12 +1344,12 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
               <View style={styles.lightboxButtons}>
                 {activeImage ? (
                   <TouchableOpacity 
-                    onPress={() => saveImageToGallery(activeImage.uri)} 
+                    onPress={() => exportImage(activeImage.uri)} 
                     style={[styles.lightboxButton, styles.lightboxButtonPrimary]}
                   >
-                    <Ionicons name="download-outline" size={16} color="#ffffff" />
+                    <Ionicons name="share-social-outline" size={16} color="#ffffff" />
                     <Text style={[styles.lightboxButtonText, styles.lightboxButtonTextPrimary]}>
-                      Save to Gallery
+                      Export Image
                     </Text>
                   </TouchableOpacity>
                 ) : (

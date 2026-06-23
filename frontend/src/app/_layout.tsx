@@ -1,10 +1,17 @@
 import { Stack } from 'expo-router';
-import { StyleSheet, View, Platform, StatusBar } from 'react-native';
+import { StyleSheet, View, Platform, StatusBar, Animated, Image, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
-import { useEffect } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
+import { useEffect, useState, useRef } from 'react';
+
+// Hold native splash screen immediately when module is parsed
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
+  const [appReady, setAppReady] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(1.0)).current;
+
   useEffect(() => {
     if (Platform.OS === 'android') {
       const NavSys = NavigationBar as any;
@@ -18,9 +25,24 @@ export default function RootLayout() {
         NavSys.setButtonStyleAsync('light').catch(() => {});
       }
     }
+
+    // Smooth loading delay for premium feeling
+    const timer = setTimeout(() => {
+      Animated.timing(fadeAnim, {
+        toValue: 0.0,
+        duration: 400,
+        useNativeDriver: true,
+      }).start(() => {
+        setAppReady(true);
+        // Hide the native splash screen underneath
+        SplashScreen.hideAsync().catch(() => {});
+      });
+    }, 1200);
+
+    return () => clearTimeout(timer);
   }, []);
 
-  // If previewing in Web, wrap in a gorgeous centered phone frame to look like a mobile app
+  // Web rendering logic
   if (Platform.OS === 'web') {
     return (
       <SafeAreaProvider>
@@ -37,6 +59,17 @@ export default function RootLayout() {
               </Stack>
             </View>
             <View style={[styles.homeIndicatorMock, { pointerEvents: 'none' as any }]} />
+
+            {/* Custom Splash Overlay for web preview */}
+            {!appReady && (
+              <Animated.View style={[StyleSheet.absoluteFill, styles.splashOverlay, { opacity: fadeAnim }]}>
+                <Image
+                  source={require('../../assets/images/android-icon-foreground.png')}
+                  style={styles.splashLogo}
+                />
+                <Text style={styles.splashText}>VoxKage</Text>
+              </Animated.View>
+            )}
           </View>
         </View>
       </SafeAreaProvider>
@@ -47,10 +80,23 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" translucent={true} backgroundColor="transparent" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="login" />
-      </Stack>
+      <View style={{ flex: 1, backgroundColor: '#000000' }}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="login" />
+        </Stack>
+
+        {/* Custom Splash Overlay for native build */}
+        {!appReady && (
+          <Animated.View style={[StyleSheet.absoluteFill, styles.splashOverlay, { opacity: fadeAnim }]} pointerEvents="none">
+            <Image
+              source={require('../../assets/images/android-icon-foreground.png')}
+              style={styles.splashLogo}
+            />
+            <Text style={styles.splashText}>VoxKage</Text>
+          </Animated.View>
+        )}
+      </View>
     </SafeAreaProvider>
   );
 }
@@ -116,5 +162,33 @@ const styles = StyleSheet.create({
     bottom: 8,
     alignSelf: 'center',
     zIndex: 100,
+  },
+  splashOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 99999,
+  },
+  splashLogo: {
+    width: 230,
+    height: 230,
+    resizeMode: 'contain',
+  },
+  splashText: {
+    color: '#ffffff',
+    fontSize: 26,
+    fontWeight: '300',
+    fontFamily: Platform.select({
+      android: 'sans-serif-light',
+      ios: 'System',
+      default: 'normal',
+    }),
+    letterSpacing: 6,
+    textTransform: 'uppercase',
+    opacity: 0.9,
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 60 : 40,
+    alignSelf: 'center',
   },
 });

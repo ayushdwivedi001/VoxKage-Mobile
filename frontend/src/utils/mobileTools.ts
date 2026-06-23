@@ -39,7 +39,15 @@ const getFileSystem = () => {
   try { return require('expo-file-system'); } catch { return null; }
 };
 const getMediaLibrary = () => {
-  try { return require('expo-media-library'); } catch { return null; }
+  try {
+    const { requireNativeModule } = require('expo-modules-core');
+    if (requireNativeModule('ExpoMediaLibraryNext')) {
+      return require('expo-media-library');
+    }
+    return null;
+  } catch {
+    return null;
+  }
 };
 const getLocation = () => {
   try { return require('expo-location'); } catch { return null; }

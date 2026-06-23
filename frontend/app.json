@@ -29,10 +29,9 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#000000",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
-          }
+          "image": "./assets/images/android-icon-foreground.png",
+          "imageWidth": 230,
+          "resizeMode": "contain"
         }
       ],
       "expo-secure-store",
@@ -43,6 +42,13 @@
         }
       ],
       "expo-sharing",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow VoxKage to access your photos, Sir.",
+          "savePhotosPermission": "Allow VoxKage to save photos to your gallery, Sir."
+        }
+      ],
       [
         "expo-navigation-bar",
         {
