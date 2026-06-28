@@ -4,9 +4,9 @@ import {
   View,
   TouchableOpacity,
   Animated,
-  KeyboardAvoidingView,
   Platform,
   Alert,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -96,7 +96,7 @@ const performUpload = async (
       };
       
       xhr.onerror = () => {
-        reject(new Error('Network request failed, Sir.'));
+        reject(new Error('Network request failed'));
       };
       
       const formData = new FormData();
@@ -163,6 +163,7 @@ export default function ChatScreen() {
   const [sidebarAnim] = useState(() => new Animated.Value(-280));
   const [playgroundAnim] = useState(() => new Animated.Value(drawerWidth));
   const [borderGlowAnim] = useState(() => new Animated.Value(0));
+  const [keyboardAnim] = useState(() => new Animated.Value(0));
 
   const flatListRef = useRef<any>(null);
 
@@ -544,6 +545,34 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS === 'web') return;
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      Animated.timing(keyboardAnim, {
+        toValue: e.endCoordinates.height - insets.bottom,
+        duration: Platform.OS === 'ios' ? 250 : 150,
+        useNativeDriver: false,
+      }).start();
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      Animated.timing(keyboardAnim, {
+        toValue: 0,
+        duration: Platform.OS === 'ios' ? 200 : 100,
+        useNativeDriver: false,
+      }).start();
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [insets.bottom]);
+
+  useEffect(() => {
     if (inputText.startsWith('/')) {
       const lowerInput = inputText.toLowerCase();
 
@@ -633,13 +662,15 @@ export default function ChatScreen() {
         ]}
       />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <Animated.View
         style={[
           styles.mainWrapper,
           Platform.OS !== 'web' && {
             paddingTop: insets.top,
-            paddingBottom: insets.bottom,
+            paddingBottom: keyboardAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [insets.bottom, insets.bottom + 1],
+            }) as any,
           },
         ]}
       >
@@ -757,7 +788,7 @@ export default function ChatScreen() {
           handleFilesPress={mediaPickers.handleFilesPress}
           onKeyPress={handleKeyPress}
         />
-      </KeyboardAvoidingView>
+      </Animated.View>
 
       {/* Stateless Side-Channel /btw Bottom Sheet Backdrop and Overlay */}
       <BtwOverlay

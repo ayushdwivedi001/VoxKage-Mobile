@@ -17,8 +17,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.shinayush.voxkage",
-      "softwareKeyboardLayoutMode": "resize"
+      "package": "com.shinayush.voxkage"
     },
     "web": {
       "output": "static",
