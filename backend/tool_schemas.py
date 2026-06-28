@@ -756,7 +756,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_get_contacts",
-            "description": "Fetch/query the user's phone contact book, sir. Supports searching by name.",
+            "description": "Fetch/query the user's phone contact book. Supports searching by name.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -770,7 +770,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_create_contact",
-            "description": "Insert a new contact card into the user's phone contact book, sir.",
+            "description": "Insert a new contact card into the user's phone contact book.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -787,7 +787,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_get_calendar_events",
-            "description": "Read scheduled events from the user's phone calendar between dates, sir.",
+            "description": "Read scheduled events from the user's phone calendar between dates.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -801,7 +801,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_create_calendar_event",
-            "description": "Add a new calendar meeting or event on the user's phone calendar, sir.",
+            "description": "Add a new calendar meeting or event on the user's phone calendar.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -819,7 +819,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_show_notification",
-            "description": "Show a local push notification alert on the user's phone, sir. Can be scheduled with delay.",
+            "description": "Show a local push notification alert on the user's phone. Can be scheduled with delay.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -835,7 +835,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_get_location",
-            "description": "Fetch the user's current GPS location coordinates (latitude and longitude) from the phone, sir.",
+            "description": "Fetch the user's current GPS location coordinates (latitude and longitude) from the phone.",
             "parameters": {
                 "type": "object",
                 "properties": {}
@@ -846,7 +846,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_get_device_stats",
-            "description": "Get current battery level, battery state, network connection type, and hardware model specifications of the phone, sir.",
+            "description": "Get current battery level, battery state, network connection type, and hardware model specifications of the phone.",
             "parameters": {
                 "type": "object",
                 "properties": {}
@@ -857,7 +857,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_trigger_haptic",
-            "description": "Trigger tactile vibration feedback (buzz) on the user's phone, sir.",
+            "description": "Trigger tactile vibration feedback (buzz) on the user's phone.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -870,7 +870,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_launch_intent",
-            "description": "Android-specific tool to trigger standard intents like opening settings, Wi-Fi, location, maps, or calling, sir.",
+            "description": "Android-specific tool to trigger standard intents like opening settings, Wi-Fi, location, maps, or calling.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -885,7 +885,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_share_file",
-            "description": "Share a file path or URL via native share sheet on the phone, sir.",
+            "description": "Share a file path or URL via native share sheet on the phone.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -901,7 +901,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_print_pdf",
-            "description": "Render HTML text or code to PDF and trigger printing on the phone, sir.",
+            "description": "Render HTML text or code to PDF and trigger printing on the phone.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -916,7 +916,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_send_sms",
-            "description": "Send an SMS text message to one or more phone numbers from the phone, sir.",
+            "description": "Send an SMS text message to one or more phone numbers from the phone.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -935,7 +935,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_set_screen_keep_awake",
-            "description": "Enable or disable keeping the screen awake indefinitely on the phone, sir.",
+            "description": "Enable or disable keeping the screen awake indefinitely on the phone.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -949,7 +949,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_speak_text",
-            "description": "Speak text aloud using the device's native Text-to-Speech (TTS) engine, sir.",
+            "description": "Speak text aloud using the device's native Text-to-Speech (TTS) engine.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -966,7 +966,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "mobile_get_media_library",
-            "description": "Retrieve recent photo assets metadata from the user's phone media library, sir.",
+            "description": "Retrieve recent photo assets metadata from the user's phone media library.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -979,7 +979,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "fetch_images_for_query",
-            "description": "Search Wikipedia/Wikimedia Commons and DuckDuckGo dynamically for a query, and return a comma-separated list of premium authentic image URLs. Use this to enrich chats with real images of fish, landmarks, movies, or entities, Sir.",
+            "description": "Search Wikipedia/Wikimedia Commons and DuckDuckGo dynamically for a query, and return a comma-separated list of premium authentic image URLs. Use this to enrich chats with real images of fish, landmarks, movies, or entities.",
             "parameters": {
                 "type": "object",
                 "properties": {

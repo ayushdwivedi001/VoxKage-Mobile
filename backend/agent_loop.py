@@ -385,7 +385,7 @@ async def execute_tool_call_v2(
                         if not confirm_choice:
                             if confirm_req_id in CONFIRMATION_CHANNELS:
                                 del CONFIRMATION_CHANNELS[confirm_req_id]
-                            raise Exception("Action rejected by user, Sir.")
+                            raise Exception("Action rejected by user.")
                     
                         if always_allow:
                             set_trusted_action(user_id, name, True, "User clicked Always Allow in chat screen")
@@ -401,7 +401,7 @@ async def execute_tool_call_v2(
                         if confirm_req_id in CONFIRMATION_CHANNELS:
                             del CONFIRMATION_CHANNELS[confirm_req_id]
                 else:
-                    raise Exception("No active connection to prompt confirmation, Sir.")
+                    raise Exception("No active connection to prompt confirmation.")
 
         # Execute Tool
         tool_output = ""
@@ -692,7 +692,7 @@ async def execute_tool_call_v2(
                 new_percent = calculate_context_percent(messages_history)
                 await send_to_client({"type": "context_sync", "percent": new_percent})
             
-                confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
+                confirm_msg = "\n[Chat history has been successfully compacted.]\n|-------- COMPACTION ENDED ---------|\n"
                 await send_to_client({"type": "token", "content": confirm_msg})
                 tool_output = f"Chat history successfully compacted. Compaction Summary: {summary}"
             elif name == "query_rag":
@@ -857,7 +857,7 @@ async def execute_tool_call_v2(
                     else:
                         tool_output = (
                             "Error: No laptop is currently connected to this account. "
-                            "Please launch the VoxKage Laptop Daemon to run local actions, sir."
+                            "Please launch the VoxKage Laptop Daemon to run local actions."
                         )
                 elif bridge_mode == "mobile_local":
                     if mobile_ws:
@@ -880,7 +880,7 @@ async def execute_tool_call_v2(
                                 if status_res == "success":
                                     tool_output = json.dumps(result_val) if not isinstance(result_val, str) else result_val
                                 else:
-                                    tool_output = f"Error executing mobile command, Sir: {result_val}"
+                                    tool_output = f"Error executing mobile command: {result_val}"
                             except asyncio.TimeoutError:
                                 tool_output = "Error: Mobile device command execution timed out (120s limit)."
                             finally:
@@ -889,7 +889,7 @@ async def execute_tool_call_v2(
                         except Exception as e:
                             tool_output = f"Error routing command to mobile device: {str(e)}"
                     else:
-                        tool_output = "Error: Active mobile client connection is not available to route local device commands, sir."
+                        tool_output = "Error: Active mobile client connection is not available to route local device commands."
 
             elif name.startswith("mobile_"):
                 import uuid
@@ -911,7 +911,7 @@ async def execute_tool_call_v2(
                         if status_res == "success":
                             tool_output = json.dumps(result_val) if not isinstance(result_val, str) else result_val
                         else:
-                            tool_output = f"Error executing device tool, Sir: {result_val}"
+                            tool_output = f"Error executing device tool: {result_val}"
                     except asyncio.TimeoutError:
                         tool_output = "Error: Mobile device tool execution timed out (60s limit)."
                     finally:
@@ -1273,7 +1273,7 @@ async def _run_agentic_loop_impl(
             doc_filename = chunks[0].get("filename", "attached_document")
         document_context_str = (
             f"\n--- ATTACHED DOCUMENT INFO ---\n"
-            f"Sir, the user has attached a document: '{doc_filename}'.\n"
+            f"The user has attached a document: '{doc_filename}'.\n"
             f"You MUST check and reference the scoped RAG chunks below to answer the user's questions about this document.\n"
         )
         if chunks:
@@ -1282,7 +1282,7 @@ async def _run_agentic_loop_impl(
                 document_context_str += f"[Chunk {idx+1} (Source: {chunk.get('filename')})]: {chunk.get('content')}\n"
             document_context_str += "--------------------------------------------------\n\n"
         else:
-            document_context_str += "(No text content could be retrieved from the document vectors, Sir.)\n\n"
+            document_context_str += "(No text content could be retrieved from the document vectors.)\n\n"
 
     personalization_str = f"Preferred Honorific: {honorific}\n{tone_instructions}\n"
     if custom_profile_data:
@@ -1327,15 +1327,20 @@ async def _run_agentic_loop_impl(
 
     messages.append({"role": "user", "content": user_message_content})
 
-    max_iterations = 20
+    v_upper = (variant or "High").upper()
+    is_agentic = v_upper in ("HIGH", "XHIGH", "MAX")
+
+    max_iterations = 20 if is_agentic else 1
     for iteration in range(max_iterations):
         payload = {
             "model": model_id,
             "messages": messages,
-            "tools": TOOLS_SCHEMA,
-            "tool_choice": "auto",
             "stream": True
         }
+        if is_agentic:
+            payload["tools"] = TOOLS_SCHEMA
+            payload["tool_choice"] = "auto"
+
         # Apply reasoning depth overrides
         payload.update(get_variant_overrides(variant))
 

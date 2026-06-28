@@ -62,7 +62,7 @@ export const SourcesModal: React.FC<SourcesModalProps> = ({
                 onPress={() => {
                   if (item.url) {
                     Linking.openURL(item.url).catch(() => {
-                      Alert.alert('Error, Sir', 'Could not open this URL.');
+                      Alert.alert('Error.', 'Could not open this URL.');
                     });
                   }
                 }}

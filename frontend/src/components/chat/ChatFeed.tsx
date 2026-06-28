@@ -12,7 +12,7 @@ let Speech: any = null;
 try {
   Speech = require('expo-speech');
 } catch (e) {
-  console.log('[ChatFeed] Speech module not available, Sir.');
+  console.log('[ChatFeed] Speech module not available.');
 }
 
 export interface ChatMessage {
@@ -246,7 +246,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                           <Ionicons name="checkmark-circle" size={15} color="#10b981" style={{ marginRight: 6 }} />
                         )}
                         <Text style={styles.thinkingAccordionText} numberOfLines={1}>
-                          {isThinkingMsg ? (thinkingStatus || 'VoxKage is processing, Sir...') : 'Thought process complete'}
+                          {isThinkingMsg ? (thinkingStatus || 'Thinking...') : 'Thought process complete'}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={14} color="#60a5fa" style={styles.thinkingAccordionChevron} />

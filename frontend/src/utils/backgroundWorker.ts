@@ -9,13 +9,13 @@ let TaskManager: any = null;
 try {
   BackgroundFetch = require('expo-background-fetch');
 } catch (e) {
-  console.log('[Background Worker] expo-background-fetch is not available, Sir. Using sandbox/mock fallback.');
+  console.log('[Background Worker] expo-background-fetch is not available. Using sandbox/mock fallback.');
 }
 
 try {
   TaskManager = require('expo-task-manager');
 } catch (e) {
-  console.log('[Background Worker] expo-task-manager is not available, Sir. Using sandbox/mock fallback.');
+  console.log('[Background Worker] expo-task-manager is not available. Using sandbox/mock fallback.');
 }
 
 // Define the background task if TaskManager and BackgroundFetch are available
@@ -59,12 +59,12 @@ export const registerBackgroundTasks = async () => {
   // Prevent registration in Expo Go to suppress deprecation/unsupported console warnings
   const isExpoGo = Constants?.appOwnership === 'expo';
   if (isExpoGo) {
-    console.log('[Background Worker] Running inside Expo Go sandbox, Sir. Skipping background task registration.');
+    console.log('[Background Worker] Running inside Expo Go sandbox. Skipping background task registration.');
     return;
   }
 
   if (!TaskManager || !BackgroundFetch) {
-    console.log('[Background Worker] Background Fetch or Task Manager is not available. Skipping task registration, Sir.');
+    console.log('[Background Worker] Background Fetch or Task Manager is not available. Skipping task registration.');
     return;
   }
 

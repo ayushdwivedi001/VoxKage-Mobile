@@ -330,11 +330,11 @@ export function useWebSocket(
     wsRef.current = ws;
 
     ws.onerror = (err) => {
-      console.error('WebSocket Error, Sir:', err);
+      console.error('WebSocket Error:', err);
     };
 
     ws.onclose = (e) => {
-      console.log('WebSocket connection closed, Sir:', e);
+      console.log('WebSocket connection closed:', e);
       if (wsRef.current === ws) {
         wsRef.current = null;
       }
@@ -505,7 +505,7 @@ export function useWebSocket(
               // fallback
             }
           }
-          showAlert('Engine Error, Sir', errorMsg);
+          showAlert('Engine Error', errorMsg);
           setLoading(false);
           setThinkingStatus(null);
           updateStreamingText('');
@@ -570,7 +570,7 @@ export function useWebSocket(
               ];
             });
             executeMobileTool('mobile_show_notification', {
-              title: 'Swarm Task Completed, Sir',
+              title: 'Swarm Task Completed',
               body: 'The research query has been compiled successfully.',
             }).catch(() => {});
           }
@@ -596,6 +596,71 @@ export function useWebSocket(
     };
   };
 
+  const ensureSessionId = async (): Promise<string | null> => {
+    let targetSessionId = sessionRef.current.currentSessionId;
+    if (targetSessionId) return targetSessionId;
+
+    if (!token || !backendUrl) return null;
+    try {
+      const response = await fetch(`${backendUrl.trim().replace(/\/$/, '')}/sessions?name=New Chat`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const session = await response.json();
+        sessionRef.current.setSessions((prev) => [session, ...prev]);
+        sessionRef.current.setCurrentSessionId(session.id);
+        sessionRef.current.setIsNewChat(false);
+        connectWebSocket(session.id, token, backendUrl);
+        return session.id;
+      }
+    } catch (e) {
+      console.error('Error in ensureSessionId:', e);
+    }
+    return null;
+  };
+
+  const ensureWebSocketConnected = (
+    sessionId: string,
+    initialStatus: string = 'Thinking...'
+  ): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        resolve(true);
+        return;
+      }
+
+      setThinkingStatus(initialStatus);
+
+      if (
+        !wsRef.current ||
+        (wsRef.current.readyState !== WebSocket.OPEN &&
+          wsRef.current.readyState !== WebSocket.CONNECTING)
+      ) {
+        connectWebSocket(sessionId, token || '', backendUrl);
+      }
+
+      let checks = 0;
+      const maxChecks = 125;
+      const interval = setInterval(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          clearInterval(interval);
+          resolve(true);
+        } else {
+          checks++;
+          if (checks % 15 === 0) {
+            setThinkingStatus('Initiating Cloud Engine...');
+          }
+          if (checks >= maxChecks) {
+            clearInterval(interval);
+            resolve(false);
+          }
+        }
+      }, 200);
+    });
+  };
+
   const handleStopGeneration = () => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -608,7 +673,7 @@ export function useWebSocket(
 
     if (currText.trim()) {
       const assistantMessageId = generateRandomId('assistant');
-      const stoppedContent = currText + '\n\n*[Generation stopped, Sir.]*';
+      const stoppedContent = currText + '\n\n*[Generation stopped.]*';
 
       const editingId = activeEditingProjectIdRef.current;
       if (editingId) {
@@ -667,11 +732,25 @@ export function useWebSocket(
             {
               role: 'assistant',
               content:
-                'Certainly, Sir. This is a side-channel reply in mock mode. I can answer quick doubts here.',
+                'This is a side-channel reply in mock mode. I can answer quick doubts here.',
             },
           ]);
           setBtwLoading(false);
         }, 800);
+        return;
+      }
+
+      let targetSessionId = await ensureSessionId();
+      if (!targetSessionId) {
+        showAlert('Error', 'Could not initialize session.');
+        setBtwLoading(false);
+        return;
+      }
+
+      const wsConnected = await ensureWebSocketConnected(targetSessionId, 'Connecting side-channel..');
+      if (!wsConnected) {
+        showAlert('Connection Failed', 'Socket connection is currently down. Cannot route side-question.');
+        setBtwLoading(false);
         return;
       }
 
@@ -694,7 +773,7 @@ export function useWebSocket(
         } else {
           setBtwMessages((prev) => [
             ...prev,
-            { role: 'assistant', content: '[Error querying side-channel, Sir.]' },
+            { role: 'assistant', content: '[Error querying side-channel.]' },
           ]);
         }
       } catch (err: any) {
@@ -711,43 +790,26 @@ export function useWebSocket(
       
       const cleanText = userQuery.replace(/^\/agents\s*/, '').trim();
       if (!cleanText) {
-        showAlert('Invalid Query, Sir', 'Please describe the task for the agents.');
+        showAlert('Invalid Query', 'Please describe the task for the agents.');
         return;
       }
 
       setLoading(true);
       setStreamingText('');
 
-      // Determine or create session id
-      let targetSessionId = sessionRef.current.currentSessionId;
+      let targetSessionId = await ensureSessionId();
       if (!targetSessionId) {
-        if (!token || !backendUrl) {
-          setLoading(false);
-          return;
-        }
-        try {
-          const response = await fetch(`${backendUrl.trim().replace(/\/$/, '')}/sessions?name=New Chat`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
-          });
+        showAlert('Error', 'Could not initialize session.');
+        setLoading(false);
+        return;
+      }
 
-          if (response.ok) {
-            const session = await response.json();
-            sessionRef.current.setSessions((prev) => [session, ...prev]);
-            targetSessionId = session.id;
-            sessionRef.current.setCurrentSessionId(session.id);
-            sessionRef.current.setIsNewChat(false);
-            connectWebSocket(session.id, token, backendUrl);
-          } else {
-            showAlert('Error', 'Failed to initialize session.');
-            setLoading(false);
-            return;
-          }
-        } catch (e) {
-          showAlert('Error', 'Could not initialize session.');
-          setLoading(false);
-          return;
-        }
+      const wsConnected = await ensureWebSocketConnected(targetSessionId, 'Warming up swarm environment...');
+      if (!wsConnected) {
+        showAlert('Connection Failed', 'Socket connection is currently down. Cannot route swarm task.');
+        setLoading(false);
+        setThinkingStatus(null);
+        return;
       }
 
       // Add local messages for user prompt and placeholder for swarm progress card
@@ -814,7 +876,7 @@ export function useWebSocket(
               {
                 id: generateRandomId('assistant'),
                 role: 'assistant',
-                content: 'Sir, I have gathered and analyzed the research. Here is the final compiled summary with links and charts.'
+                content: 'I have gathered and analyzed the research. Here is the final compiled summary with links and charts.'
               }
             ];
           });
@@ -847,11 +909,11 @@ export function useWebSocket(
           }
         } else {
           const errText = await response.text();
-          showAlert('Swarm Launch Error, Sir', errText || 'Failed to launch swarm task.');
+          showAlert('Swarm Launch Error', errText || 'Failed to launch swarm task.');
           setMessages((prev) => prev.filter((m) => m.id !== 'swarm-progress-msg'));
         }
       } catch (err: any) {
-        showAlert('Swarm Launch Error, Sir', err.message || String(err));
+        showAlert('Swarm Launch Error', err.message || String(err));
         setMessages((prev) => prev.filter((m) => m.id !== 'swarm-progress-msg'));
       } finally {
         setLoading(false);
@@ -896,12 +958,12 @@ export function useWebSocket(
         let isCodeQuery = /dashboard|html|website|page/i.test(userQuery);
         let isCmdQuery = /run|git|sys/i.test(userQuery);
 
-        let responseTemplate = `Certainly, Sir. I am online in Simulation Mode. Let me know what you need.`;
+        let responseTemplate = `I am online in Simulation Mode. Let me know what you need.`;
         if (staged) {
-          responseTemplate = `Certainly, Sir. I see the attached ${staged.type} '${staged.name}'. I have indexed its content in Supabase. How can I help you with it?`;
+          responseTemplate = `I see the attached ${staged.type} '${staged.name}'. I have indexed its content in Supabase. How can I help you with it?`;
         } else if (isCodeQuery) {
           responseTemplate = [
-            'Certainly, Sir. I have constructed an interactive live preview app dashboard for you. You can slide open the Code Playground drawer on the right to view it live.',
+            'I have constructed an interactive live preview app dashboard for you. You can slide open the Code Playground drawer on the right to view it live.',
             '',
             '```html',
             '<!DOCTYPE html>',
@@ -917,8 +979,8 @@ export function useWebSocket(
             '<body>',
             "<div class='card'>",
             '<h1>VoxKage Mobile Live Sandbox</h1>',
-            '<p>This is a live compiled application built by VoxKage, Sir.</p>',
-            '<button onclick=\'alert("Hello Sir!")\'>Trigger Interaction</button>',
+            '<p>This is a live compiled application built by VoxKage.</p>',
+            '<button onclick=\'alert("Hello!")\'>Trigger Interaction</button>',
             '</div>',
             '</body>',
             '</html>',
@@ -939,7 +1001,7 @@ export function useWebSocket(
               ].join('\n'),
             },
           ]);
-          responseTemplate = `The power shell command execution completed, Sir. Working tree is clean.`;
+          responseTemplate = `The power shell command execution completed. Working tree is clean.`;
         }
 
         let words = responseTemplate.split(' ');
@@ -969,38 +1031,17 @@ export function useWebSocket(
       }, 1000);
       return;
     }
-
-    let targetSessionId = sessionRef.current.currentSessionId;
+    let targetSessionId = await ensureSessionId();
     if (!targetSessionId) {
-      if (!token || !backendUrl) return;
-      try {
-        const response = await fetch(`${backendUrl}/sessions?name=New Chat`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (response.ok) {
-          const session = await response.json();
-          sessionRef.current.setSessions((prev) => [session, ...prev]);
-          targetSessionId = session.id;
-          sessionRef.current.setCurrentSessionId(session.id);
-          sessionRef.current.setIsNewChat(false);
-          connectWebSocket(session.id, token, backendUrl);
-        } else {
-          showAlert('Error', 'Failed to initialize session.');
-          return;
-        }
-      } catch (e) {
-        showAlert('Error', 'Could not initialize session.');
-        return;
-      }
+      setLoading(false);
+      return;
     }
 
     let uploadedDocId: string | null = null;
 
     if (staged && (staged.type === 'document' || staged.type === 'image')) {
       setUploadingFile(true);
-      setThinkingStatus(`Uploading and indexing ${staged.type}, Sir...`);
+      setThinkingStatus(`Uploading and indexing ${staged.type}`);
 
       try {
         const uploadUrl = `${backendUrl}/rag/upload`;
@@ -1063,7 +1104,7 @@ export function useWebSocket(
     setStagedAttachment(null);
     setLoading(true);
     setStreamingText('');
-    setThinkingStatus('Connecting to VoxKage core, Sir...');
+    setThinkingStatus('Thinking...');
 
     const constructPayload = () => {
       return JSON.stringify({
@@ -1087,37 +1128,14 @@ export function useWebSocket(
       });
     };
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    const wsConnected = await ensureWebSocketConnected(targetSessionId);
+    if (wsConnected && wsRef.current) {
+      setThinkingStatus('Thinking...');
       wsRef.current.send(constructPayload());
     } else {
-      if (
-        !wsRef.current ||
-        (wsRef.current.readyState !== WebSocket.OPEN &&
-          wsRef.current.readyState !== WebSocket.CONNECTING)
-      ) {
-        connectWebSocket(targetSessionId || '', token || '', backendUrl);
-      }
-
-      let checks = 0;
-      const maxChecks = 125;
-      const interval = setInterval(() => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          clearInterval(interval);
-          setThinkingStatus('VoxKage is processing, Sir...');
-          wsRef.current.send(constructPayload());
-        } else {
-          checks++;
-          if (checks % 15 === 0) {
-            setThinkingStatus('Waking up cloud engine, Sir... Please stand by.');
-          }
-          if (checks >= maxChecks) {
-            clearInterval(interval);
-            showAlert('Connection Failed', 'Socket connection is currently down. Please retry, Sir.');
-            setLoading(false);
-            setThinkingStatus(null);
-          }
-        }
-      }, 200);
+      showAlert('Connection Failed', 'Socket connection is currently down. Please retry.');
+      setLoading(false);
+      setThinkingStatus(null);
     }
   };
 
@@ -1172,7 +1190,7 @@ export function useWebSocket(
     }
   };
 
-  const handleDrillAnswer = (answer: string) => {
+  const handleDrillAnswer = async (answer: string) => {
     const clientTimeStr = new Date().toLocaleString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -1191,7 +1209,7 @@ export function useWebSocket(
     ]);
     setLoading(true);
     setStreamingText('');
-    setThinkingStatus('VoxKage is processing, Sir...');
+    setThinkingStatus('Thinking...');
 
     const payload = JSON.stringify({
       message: answer,
@@ -1203,8 +1221,20 @@ export function useWebSocket(
       image: undefined,
     });
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    let targetSessionId = await ensureSessionId();
+    if (!targetSessionId) {
+      setLoading(false);
+      return;
+    }
+
+    const wsConnected = await ensureWebSocketConnected(targetSessionId);
+    if (wsConnected && wsRef.current) {
+      setThinkingStatus('Thinking...');
       wsRef.current.send(payload);
+    } else {
+      showAlert('Connection Failed', 'Socket connection is currently down. Please retry.');
+      setLoading(false);
+      setThinkingStatus(null);
     }
   };
 
@@ -1227,10 +1257,10 @@ export function useWebSocket(
         setActiveSwarmTask(null);
         setMessages((prev) => prev.filter((m) => m.id !== 'swarm-progress-msg'));
       } else {
-        console.error('Failed to cancel swarm task, Sir.');
+        console.error('Failed to cancel swarm task.');
       }
     } catch (err) {
-      console.error('Error canceling swarm task, Sir:', err);
+      console.error('Error canceling swarm task:', err);
     }
   };
 

@@ -629,7 +629,7 @@ function ImageWithLoader({ uri, alt, style, resizeMode = 'cover', width, height,
       ) : (
         <View style={styles.imageErrorContainer}>
           <Ionicons name="image-outline" size={28} color="#ef4444" style={{ marginBottom: 4 }} />
-          <Text style={styles.imageErrorText} numberOfLines={1}>Failed to load visual component, Sir.</Text>
+          <Text style={styles.imageErrorText} numberOfLines={1}>Failed to load visual component.</Text>
           {isBase64 ? (
             <Text style={styles.imageErrorSubtext}>Corrupted base64 chart data.</Text>
           ) : (
@@ -1279,7 +1279,8 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
   return (
     <View style={styles.container}>
       {elements}
-      <Modal
+
+      <Modal
         visible={activeImage !== null || activeChart !== null}
         transparent={true}
         animationType="none"
@@ -1353,7 +1354,7 @@ export function MarkdownRenderer({ text, onDrillAnswer }: MarkdownRendererProps)
                     </Text>
                   </TouchableOpacity>
                 ) : (
-                  <Text style={{ color: '#64748b', fontSize: 12 }}>Interactive chart preview, Sir</Text>
+                  <Text style={{ color: '#64748b', fontSize: 12 }}>Interactive chart preview.</Text>
                 )}
                 
                 {activeImage && !activeImage.uri.startsWith('data:image/') && (

@@ -67,7 +67,7 @@ async def run_subagent_loop(
     if previous_findings:
         history.append({
             "role": "user",
-            "content": f"Here is the context and findings gathered by preceding subagents in this swarm, sir:\n\n{previous_findings}"
+            "content": f"Here is the context and findings gathered by preceding subagents in this swarm:\n\n{previous_findings}"
         })
         
     laptop_ws = manager.active_laptops.get(user_id) if manager else None
@@ -211,7 +211,7 @@ async def run_subagent_loop(
             compilation_history = history + [
                 {
                     "role": "system",
-                    "content": "You have completed your tool execution turns. Please compile all your findings, code modifications, and results into a final, structured report for the coordinator, sir."
+                    "content": "You have completed your tool execution turns. Please compile all your findings, code modifications, and results into a final, structured report for the coordinator."
                 }
             ]
             payload = {
@@ -300,9 +300,9 @@ async def launch_swarm_background(
         
         prompt = f"User Query: {query}\n"
         if specified_agent_count:
-            prompt += f"You MUST use exactly {specified_agent_count} subagents, sir."
+            prompt += f"You MUST use exactly {specified_agent_count} subagents."
         else:
-            prompt += "Use a minimum baseline of 3 subagents, sir."
+            prompt += "Use a minimum baseline of 3 subagents."
             
         history = [{"role": "system", "content": system_instruction}]
         
@@ -475,7 +475,7 @@ async def launch_swarm_background(
         update_session_active_swarm(session_id, user_id, active_swarm)
         
         # Log final assistant message to chat
-        log_message(session_id, "assistant", f"Sir, the background research task is finished. Here is the final compiled report:\n\n{final_report}")
+        log_message(session_id, "assistant", f"The background research task is finished. Here is the final compiled report:\n\n{final_report}")
         
         # Broadcast completed state
         chat_wss = manager.active_chats.get(user_id, [])

@@ -179,14 +179,14 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
             {isLoadingProjects ? (
               <View style={styles.playgroundLoadingContainer}>
                 <ActivityIndicator size="large" color="#3b82f6" />
-                <Text style={styles.playgroundLoadingText}>Loading previews, Sir...</Text>
+                <Text style={styles.playgroundLoadingText}>Loading previews..</Text>
               </View>
             ) : projects.length === 0 ? (
               <View style={styles.playgroundEmptyContainer}>
                 <Ionicons name="folder-open-outline" size={64} color="#475569" style={styles.playgroundEmptyIcon} />
                 <Text style={styles.playgroundEmptyTitle}>Playground is empty</Text>
                 <Text style={styles.playgroundEmptyDesc}>
-                  Live previews will show up here, Sir. Ask VoxKage to build an app or webpage to see it live here.
+                  Live previews will show up here. Ask VoxKage to build an app or webpage to see it live here.
                 </Text>
               </View>
             ) : (
@@ -226,7 +226,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
                             {p.name || 'Untitled Preview'}
                           </Text>
                         )}
-                        <Text style={styles.projectItemSub}>Tap to open preview, Sir</Text>
+                        <Text style={styles.projectItemSub}>Tap to open preview</Text>
                       </View>
                     </TouchableOpacity>
 
@@ -318,7 +318,7 @@ export const PlaygroundDrawer: React.FC<PlaygroundDrawerProps> = ({
                 contentContainerStyle={{ paddingBottom: 32 }}
               >
                 <Text style={{ color: '#94a3b8', fontSize: 13, marginBottom: 16, fontWeight: '600' }}>
-                  Workspace Files, Sir:
+                  Workspace Files:
                 </Text>
                 {(() => {
                   const activeProj = projects.find(p => p.id === playgroundProjectId);

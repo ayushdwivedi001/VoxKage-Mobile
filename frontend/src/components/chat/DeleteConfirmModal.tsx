@@ -22,7 +22,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
         <Ionicons name="trash-outline" size={32} color="#ef4444" style={styles.confirmIcon} />
         <Text style={styles.confirmTitle}>Delete Chat Thread</Text>
         <Text style={styles.confirmMessage}>
-          Are you sure you want to permanently delete &quot;{sessionToDelete.name}&quot;, Sir?
+          Are you sure you want to permanently delete &quot;{sessionToDelete.name}&quot;?
         </Text>
         <View style={styles.confirmButtonsRow}>
           <TouchableOpacity

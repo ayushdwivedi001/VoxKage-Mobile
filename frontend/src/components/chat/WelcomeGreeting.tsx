@@ -23,7 +23,7 @@ const GREETINGS = [
 ];
 
 export const WelcomeGreeting: React.FC = () => {
-  const [greeting, setGreeting] = useState("How can I help you today, Sir?");
+  const [greeting, setGreeting] = useState("How can I help you today?");
 
   useEffect(() => {
     const randomGreeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];

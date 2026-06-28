@@ -160,7 +160,7 @@ async def fetch_images_for_query(query: str, limit: int = 5) -> str:
     All three tiers fire IN PARALLEL via asyncio.gather() with 9s total timeout.
     Results are validated, deduplicated, and Wikimedia URLs are always placed first.
 
-    Sir, this completely eliminates the Bing/DDG scraping failures that were causing
+    This completely eliminates the Bing/DDG scraping failures that were causing
     the 'Unexpected character: P' (HTML CAPTCHA page) and image load errors.
     """
     import asyncio

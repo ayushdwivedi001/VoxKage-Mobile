@@ -12,7 +12,7 @@ export function usePlayground(
   const [activeEditingProjectId, setActiveEditingProjectId] = useState<string | null>(null);
 
   const [playgroundHtml, setPlaygroundHtml] = useState(
-    '<h1>No live preview compiled yet, Sir.</h1><p>Ask VoxKage to build an app/web page to see it live here.</p>'
+    '<h1>No live preview compiled yet.</h1><p>Ask VoxKage to build an app/web page to see it live here.</p>'
   );
   const [playgroundCss, setPlaygroundCss] = useState('');
   const [playgroundJs, setPlaygroundJs] = useState('');
@@ -99,7 +99,7 @@ export function usePlayground(
       }
     } catch (e) {
       console.error('Failed to save project', e);
-      showAlert('Connection Warning', 'Unable to sync preview with the cloud. Running locally, Sir.');
+      showAlert('Connection Warning', 'Unable to sync preview with the cloud. Running locally.');
     }
     return null;
   };
@@ -108,7 +108,7 @@ export function usePlayground(
     if (token?.startsWith('mock-')) {
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
       if (playgroundProjectId === projectId) {
-        setPlaygroundHtml('<h1>No live preview compiled yet, Sir.</h1>');
+        setPlaygroundHtml('<h1>No live preview compiled yet.</h1>');
         setPlaygroundCss('');
         setPlaygroundJs('');
         setPlaygroundProjectName('New Live App');
@@ -126,7 +126,7 @@ export function usePlayground(
       if (response.ok) {
         setProjects((prev) => prev.filter((p) => p.id !== projectId));
         if (playgroundProjectId === projectId) {
-          setPlaygroundHtml('<h1>No live preview compiled yet, Sir.</h1>');
+          setPlaygroundHtml('<h1>No live preview compiled yet.</h1>');
           setPlaygroundCss('');
           setPlaygroundJs('');
           setPlaygroundProjectName('New Live App');
@@ -135,7 +135,7 @@ export function usePlayground(
       }
     } catch (e) {
       console.error('Failed to delete project', e);
-      showAlert('Error', 'Failed to delete preview, Sir.');
+      showAlert('Error', 'Failed to delete preview.');
     }
   };
 
@@ -182,7 +182,7 @@ export function usePlayground(
       }
     } catch (e) {
       console.error('Failed to rename project', e);
-      showAlert('Error', 'Failed to rename preview, Sir.');
+      showAlert('Error', 'Failed to rename preview.');
     } finally {
       setProjectToRename(null);
     }
@@ -227,7 +227,7 @@ export function usePlayground(
     const jsMatch = content.match(/```javascript\n([\s\S]*?)```/i) || content.match(/```js\n([\s\S]*?)```/i);
 
     if (!htmlMatch && !cssMatch && !jsMatch) {
-      showAlert('Workspace Notice', 'There is no compiled playground markup or styles in this message, Sir.');
+      showAlert('Workspace Notice', 'There is no compiled playground markup or styles in this message.');
       return;
     }
 

@@ -215,7 +215,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             return data;
           }
         } catch (e) {
-          console.log('[MobileTools] Native Contacts failed, falling back to sandbox, Sir.', e);
+          console.log('[MobileTools] Native Contacts failed, falling back to sandbox.', e);
         }
       }
       
@@ -257,7 +257,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             createdNatively = true;
           }
         } catch (e) {
-          console.log('[MobileTools] Native Create Contact failed, falling back to sandbox, Sir.', e);
+          console.log('[MobileTools] Native Create Contact failed, falling back to sandbox.', e);
         }
       }
 
@@ -296,7 +296,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             }));
           }
         } catch (e) {
-          console.log('[MobileTools] Native Calendar failed, falling back to sandbox, Sir.', e);
+          console.log('[MobileTools] Native Calendar failed, falling back to sandbox.', e);
         }
       }
       
@@ -343,7 +343,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             }
           }
         } catch (e) {
-          console.log('[MobileTools] Native Create Calendar Event failed, falling back to sandbox, Sir.', e);
+          console.log('[MobileTools] Native Create Calendar Event failed, falling back to sandbox.', e);
         }
       }
 
@@ -378,7 +378,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             return { status: 'success', notificationId: id, method: 'native' };
           }
         } catch (e) {
-          console.log('[MobileTools] Native Notifications failed, falling back, Sir.', e);
+          console.log('[MobileTools] Native Notifications failed, falling back.', e);
         }
       }
       
@@ -398,11 +398,11 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
     case 'mobile_write_file': {
       const FileSystem = getFileSystem();
       if (!FileSystem) {
-        throw new Error('FileSystem is not available in this environment, Sir.');
+        throw new Error('FileSystem is not available in this environment.');
       }
       const docDir = FileSystem.documentDirectory;
       if (!docDir) {
-        throw new Error('documentDirectory is not available on this platform, Sir.');
+        throw new Error('documentDirectory is not available on this platform.');
       }
       const dir = docDir + (args.directory ? args.directory.replace(/^\/+/, '') : '');
       const path = `${dir}/${args.filename}`;
@@ -414,11 +414,11 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
     case 'mobile_read_file': {
       const FileSystem = getFileSystem();
       if (!FileSystem) {
-        throw new Error('FileSystem is not available in this environment, Sir.');
+        throw new Error('FileSystem is not available in this environment.');
       }
       const docDir = FileSystem.documentDirectory;
       if (!docDir) {
-        throw new Error('documentDirectory is not available on this platform, Sir.');
+        throw new Error('documentDirectory is not available on this platform.');
       }
       const path = `${docDir}/${args.filename}`;
       const content = await FileSystem.readAsStringAsync(path, { encoding: FileSystem.EncodingType.UTF8 });
@@ -447,7 +447,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             }));
           }
         } catch (e) {
-          console.log('[MobileTools] Native MediaLibrary failed, falling back to sandbox mock, Sir.', e);
+          console.log('[MobileTools] Native MediaLibrary failed, falling back to sandbox mock.', e);
         }
       }
       // Sandbox fallback: Return mock assets
@@ -481,7 +481,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             };
           }
         } catch (e) {
-          console.log('[MobileTools] Native Location failed, falling back to sandbox default, Sir.', e);
+          console.log('[MobileTools] Native Location failed, falling back to sandbox default.', e);
         }
       }
       // Sandbox default location (Delhi, India)
@@ -518,7 +518,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
           };
           batteryState = batteryStatesMap[state] || 'Charging';
         } catch (e) {
-          console.log('[MobileTools] Battery state API failed, Sir.', e);
+          console.log('[MobileTools] Battery state API failed.', e);
         }
       }
 
@@ -529,7 +529,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
           networkType = networkState.type ?? 'WIFI';
           isInternetReachable = networkState.isInternetReachable ?? true;
         } catch (e) {
-          console.log('[MobileTools] Network state API failed, Sir.', e);
+          console.log('[MobileTools] Network state API failed.', e);
         }
       }
 
@@ -574,7 +574,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           }
         } catch (e) {
-          console.log('[MobileTools] Haptics trigger failed, Sir.', e);
+          console.log('[MobileTools] Haptics trigger failed.', e);
         }
       }
       return { status: 'success' };
@@ -597,16 +597,16 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             });
             return { status: 'success' };
           } catch (e) {
-            console.log('[MobileTools] Native Intent Launcher failed, Sir.', e);
+            console.log('[MobileTools] Native Intent Launcher failed.', e);
           }
         }
       }
-      throw new Error('Intent launching is only supported natively on Android, Sir.');
+      throw new Error('Intent launching is only supported natively on Android.');
     }
 
     case 'mobile_open_url': {
       const url = args.url;
-      if (!url) throw new Error('No URL provided, Sir.');
+      if (!url) throw new Error('No URL provided.');
       const Linking = require('react-native').Linking;
       try {
         const supported = await Linking.canOpenURL(url);
@@ -640,10 +640,10 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             return { status: 'success' };
           }
         } catch (e) {
-          console.log('[MobileTools] Sharing failed, Sir.', e);
+          console.log('[MobileTools] Sharing failed.', e);
         }
       }
-      throw new Error('Sharing is not available on this platform/client, Sir.');
+      throw new Error('Sharing is not available on this platform/client.');
     }
 
     // 11. Print PDF
@@ -657,10 +657,10 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
           }
           return { status: 'success', pdfUri: uri };
         } catch (e) {
-          console.log('[MobileTools] Print failed, Sir.', e);
+          console.log('[MobileTools] Print failed.', e);
         }
       }
-      throw new Error('PDF Printing module is not available in this client, Sir.');
+      throw new Error('PDF Printing module is not available in this client.');
     }
 
     // 12. SMS
@@ -674,10 +674,10 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             return { status: result };
           }
         } catch (e) {
-          console.log('[MobileTools] SMS failed, Sir.', e);
+          console.log('[MobileTools] SMS failed.', e);
         }
       }
-      throw new Error('SMS service is not available on this device, Sir.');
+      throw new Error('SMS service is not available on this device.');
     }
 
     // 13. Screen Keep Awake
@@ -699,7 +699,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
             }
           }
         } catch (e) {
-          console.log('[MobileTools] KeepAwake failed, Sir.', e);
+          console.log('[MobileTools] KeepAwake failed.', e);
         }
       }
       return { status: 'success', keepAwake: args.enable };
@@ -721,7 +721,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
           });
           return { status: 'success' };
         } catch (e) {
-          console.log('[MobileTools] Speech synthesis failed, Sir.', e);
+          console.log('[MobileTools] Speech synthesis failed.', e);
         }
       }
       return { status: 'mock_success', text: args.text };
@@ -856,7 +856,7 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
         }
         
         if (urls.length === 0) {
-          return "Error: No authentic images found, Sir.";
+          return "Error: No authentic images found.";
         }
         return urls.slice(0, limit).join(',');
       } catch (err: any) {
@@ -865,6 +865,6 @@ export const executeMobileTool = async (name: string, args: any): Promise<any> =
     }
 
     default:
-      throw new Error(`Tool '${name}' is not supported or not implemented, Sir.`);
+      throw new Error(`Tool '${name}' is not supported or not implemented.`);
   }
 };

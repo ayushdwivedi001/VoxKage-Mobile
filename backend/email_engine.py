@@ -70,7 +70,7 @@ def get_gmail_service():
                 except Exception as e:
                     raise Exception(f"Failed to initialize auth flow from environment: {e}")
             elif os.path.exists(CREDENTIALS_PATH):
-                raise Exception("Gmail token expired/missing. Please launch VoxKage on your desktop to complete OAuth login, sir.")
+                raise Exception("Gmail token expired/missing. Please launch VoxKage on your desktop to complete OAuth login.")
             else:
                 raise FileNotFoundError("Missing Google OAuth credentials (credentials.json/gmail_token.json). Please check setup.")
 
@@ -206,7 +206,7 @@ def send_email(to: str, subject: str, body: str, cc: str = "", bcc: str = "") ->
         message.attach(MIMEText(body, "plain"))
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
         service.users().messages().send(userId="me", body={"raw": raw}).execute()
-        return f"✅ Email sent successfully, sir.\n   To      : {to}\n   Subject : {subject}"
+        return f"✅ Email sent successfully.\n   To      : {to}\n   Subject : {subject}"
     except Exception as e:
         return f"❌ Failed to send email: {e}"
 
@@ -222,7 +222,7 @@ def save_draft(to: str, subject: str, body: str, cc: str = "") -> str:
         message.attach(MIMEText(body, "plain"))
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
         draft = service.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
-        return f"📝 Draft saved, sir.\n   Draft ID : {draft['id']}\n   To       : {to}\n   Subject  : {subject}"
+        return f"📝 Draft saved.\n   Draft ID : {draft['id']}\n   To       : {to}\n   Subject  : {subject}"
     except Exception as e:
         return f"❌ Failed to save draft: {e}"
 

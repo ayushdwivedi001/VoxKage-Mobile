@@ -551,7 +551,7 @@ async def query_llm_proxied(
     else:
         # User specified no fallback to server IP to prevent rate limits!
         raise Exception(
-            "No active laptop bridge daemon or mobile app client connected to proxy the completion request, Sir. "
+            "No active laptop bridge daemon or mobile app client connected to proxy the completion request. "
             "Please ensure the laptop bridge client or mobile app is active to route completions."
         )
 
@@ -700,7 +700,7 @@ def project_preview(
 
     auth_token = token or voxkage_preview_auth
     if not auth_token:
-        raise HTTPException(status_code=401, detail="Unauthorized preview access, Sir.")
+        raise HTTPException(status_code=401, detail="Unauthorized preview access.")
     
     from jose import jwt, JWTError
     from auth import SECRET_KEY, ALGORITHM
@@ -730,7 +730,7 @@ def project_preview(
 
     normalized_path = os.path.normpath(file_path).replace("\\", "/")
     if normalized_path.startswith("../") or "/../" in normalized_path or normalized_path.startswith("/"):
-        raise HTTPException(status_code=403, detail="Forbidden: Path traversal blocked, Sir.")
+        raise HTTPException(status_code=403, detail="Forbidden: Path traversal blocked.")
 
     def inject_error_script(html_content: str) -> str:
         if not session_id:
@@ -840,7 +840,7 @@ def project_preview(
         </head>
         <body>
             <h1>Workspace Files Browser — {project.get('name', 'Untitled Project')}</h1>
-            <p style="color: #64748b; font-size: 13px;">No index.html found. Here are the available files, Sir:</p>
+            <p style="color: #64748b; font-size: 13px;">No index.html found. Here are the available files:</p>
             <ul>
         """
         for f in sorted(files.keys()):
@@ -855,7 +855,7 @@ def project_preview(
             response.set_cookie(key="voxkage_preview_auth", value=token, httponly=True, samesite="none", secure=True)
         return response
 
-    raise HTTPException(status_code=404, detail=f"File {file_path} not found in workspace, Sir.")
+    raise HTTPException(status_code=404, detail=f"File {file_path} not found in workspace.")
 
 @app.get("/projects/{project_id}/download")
 def download_project(
@@ -870,7 +870,7 @@ def download_project(
 
     auth_token = token or voxkage_preview_auth
     if not auth_token:
-        raise HTTPException(status_code=401, detail="Unauthorized downloader access, Sir.")
+        raise HTTPException(status_code=401, detail="Unauthorized downloader access.")
     
     from jose import jwt, JWTError
     from auth import SECRET_KEY, ALGORITHM
@@ -992,7 +992,7 @@ async def upload_rag_document(
     if size > 50 * 1024 * 1024:
         raise HTTPException(
             status_code=400,
-            detail="File size exceeds the maximum allowed limit of 50MB, Sir."
+            detail="File size exceeds the maximum allowed limit of 50MB."
         )
         
     import uuid
@@ -1046,7 +1046,7 @@ async def transcribe_voice(
         if not hf_token:
             raise HTTPException(
                 status_code=500, 
-                detail="GROQ_API_KEY and HF_TOKEN environment keys are missing on backend, Sir."
+                detail="GROQ_API_KEY and HF_TOKEN environment keys are missing on backend."
             )
             
         url = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
@@ -1201,7 +1201,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 
                 goal = query[7:].strip()
                 if not goal:
-                    msg = "Please specify a goal to drill, Sir. (e.g. `/drill build a basic calculator`)"
+                    msg = "Please specify a goal to drill. (e.g. `/drill build a basic calculator`)"
                     await websocket.send_text(json.dumps({"type": "token", "content": msg}))
                     await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
                     continue
@@ -1269,7 +1269,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                     
                 except Exception as ex:
                     print(f"[-] Drill initiation failed: {ex}")
-                    err_msg = f"[Failed to structure questions for: '{goal}'. Please try again, Sir.]"
+                    err_msg = f"[Failed to structure questions for: '{goal}'. Please try again.]"
                     await websocket.send_text(json.dumps({"type": "token", "content": err_msg}))
                     await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
                 continue
@@ -1280,8 +1280,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                 if query.lower() in ["/cancel", "/exit", "cancel", "exit"]:
                     save_user_drill_session(user, None)
                     log_message(session_id, "user", query)
-                    log_message(session_id, "assistant", "[Drill session canceled, Sir.]")
-                    await websocket.send_text(json.dumps({"type": "token", "content": "[Drill session canceled, Sir.]"}))
+                    log_message(session_id, "assistant", "[Drill session canceled.]")
+                    await websocket.send_text(json.dumps({"type": "token", "content": "[Drill session canceled.]"}))
                     await websocket.send_text(json.dumps({"type": "done", "project_id": None}))
                     continue
                 
@@ -1345,7 +1345,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, token: 
                     new_percent = calculate_context_percent(messages_history)
                     await websocket.send_text(json.dumps({"type": "context_sync", "percent": new_percent}))
                     
-                    confirm_msg = "\n[Chat history has been successfully compacted, Sir.]\n|-------- COMPACTION ENDED ---------|\n"
+                    confirm_msg = "\n[Chat history has been successfully compacted.]\n|-------- COMPACTION ENDED ---------|\n"
                     # Log assistant confirmation in DB
                     log_message(session_id, "assistant", confirm_msg)
                     

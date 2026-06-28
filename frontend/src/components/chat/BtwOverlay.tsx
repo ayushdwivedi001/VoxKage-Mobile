@@ -65,7 +65,7 @@ export const BtwOverlay: React.FC<BtwOverlayProps> = ({
                     alignSelf: isUser ? 'flex-end' : 'flex-start',
                   }}
                 >
-                  {isUser ? 'SIR' : 'VOXKAGE'}
+                  {isUser ? 'YOU' : 'VOXKAGE'}
                 </Text>
                 <View
                   style={{

@@ -152,7 +152,7 @@ def delete_rag_document(user_id: str, document_id: str | None = None, filename: 
     Deletes all vector chunks associated with a specific document_id or filename for the given user.
     """
     if not document_id and not filename:
-        return {"status": "error", "message": "Either document_id or filename must be provided, Sir."}
+        return {"status": "error", "message": "Either document_id or filename must be provided."}
         
     db = get_db()
     try:
@@ -166,7 +166,7 @@ def delete_rag_document(user_id: str, document_id: str | None = None, filename: 
         deleted_count = len(res.data) if res.data else 0
         return {
             "status": "success",
-            "message": "Successfully deleted RAG document chunks, Sir.",
+            "message": "Successfully deleted RAG document chunks.",
             "chunks_removed": deleted_count,
             "document_id": document_id,
             "filename": filename

@@ -125,7 +125,7 @@ export const ModelSelectionModal: React.FC<ModelSelectionModalProps> = ({
           <Ionicons name="search-outline" size={16} color="#475569" />
           <TextInput
             style={styles.modelSearchInput}
-            placeholder="Search models, Sir..."
+            placeholder="Search models..."
             placeholderTextColor="#475569"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -194,7 +194,7 @@ export const ModelSelectionModal: React.FC<ModelSelectionModalProps> = ({
           {filteredModels.length === 0 && (
             <View style={{ padding: 24, alignItems: 'center' }}>
               <Ionicons name="cube-outline" size={32} color="#475569" style={{ marginBottom: 8 }} />
-              <Text style={{ color: '#475569', fontSize: 13 }}>No models match your search, Sir.</Text>
+              <Text style={{ color: '#475569', fontSize: 13 }}>No models match your search.</Text>
             </View>
           )}
         </ScrollView>

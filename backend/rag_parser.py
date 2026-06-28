@@ -149,7 +149,7 @@ async def extract_text_from_image(file_path: str, model: str = None) -> str:
                 "content": [
                     {
                         "type": "text", 
-                        "text": "Extract all text, transcribing every detail, table, chart, and providing a thorough description of this image for vector search RAG database indexing, Sir."
+                        "text": "Extract all text, transcribing every detail, table, chart, and providing a thorough description of this image for vector search RAG database indexing."
                     },
                     {
                         "type": "image_url",
@@ -188,7 +188,7 @@ async def extract_text_from_image(file_path: str, model: str = None) -> str:
                     friendly_model = model or "mimo-v2.5-free"
                     raise HTTPException(
                         status_code=400,
-                        detail=f"⚠️ The current model '{friendly_model}' does not support image/multimodal understanding, Sir. Please select a vision-capable model (like Mimo Free) from the variant dropdown."
+                        detail=f"⚠️ The current model '{friendly_model}' does not support image/multimodal understanding. Please select a vision-capable model (like Mimo Free) from the variant dropdown."
                     )
                 
                 raise HTTPException(

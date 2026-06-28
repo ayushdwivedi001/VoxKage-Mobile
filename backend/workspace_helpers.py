@@ -53,7 +53,7 @@ def get_safe_workspace_path(base_dir: str, file_path: str) -> str:
     clean_relative = file_path.lstrip("/\\")
     resolved_path = os.path.abspath(os.path.join(base_dir, clean_relative))
     if not resolved_path.startswith(os.path.abspath(base_dir)):
-        raise PermissionError("Path traversal attempt detected, Sir.")
+        raise PermissionError("Path traversal attempt detected.")
     return resolved_path
 
 def sync_workspace_to_local(project_id: str, files_dict: dict):

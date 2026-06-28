@@ -64,9 +64,9 @@ async function main() {
       .toFile(path.join(targetDir, 'android-icon-monochrome.png'));
       
     console.log('✔ android-icon-monochrome.png created.');
-    console.log('Icon generation completed successfully, sir!');
+    console.log('Icon generation completed successfully!');
   } catch (error) {
-    console.error('Failed to generate icons, sir:', error);
+    console.error('Failed to generate icons:', error);
     process.exit(1);
   }
 }

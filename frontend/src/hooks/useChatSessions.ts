@@ -110,7 +110,7 @@ export function useChatSessions(
         connectWebSocketRef.current?.(sessionId, token || '', backendUrl);
       }
     } catch (e) {
-      showAlert('Error', 'Failed to fetch session messages, Sir.');
+      showAlert('Error', 'Failed to fetch session messages.');
     } finally {
       closeSidebar();
     }
@@ -147,10 +147,10 @@ export function useChatSessions(
           setIsNewChat(true);
         }
       } else {
-        showAlert('Error', 'Failed to delete session, Sir.');
+        showAlert('Error', 'Failed to delete session.');
       }
     } catch (e) {
-      showAlert('Error', 'Failed to delete session, Sir.');
+      showAlert('Error', 'Failed to delete session.');
     }
   };
 
@@ -178,11 +178,11 @@ export function useChatSessions(
           prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s))
         );
       } else {
-        showAlert('Error', 'Failed to rename session, Sir.');
+        showAlert('Error', 'Failed to rename session.');
       }
     } catch (e) {
       console.error(e);
-      showAlert('Error', 'Connection failure renaming session, Sir.');
+      showAlert('Error', 'Connection failure renaming session.');
     } finally {
       setEditingSessionId(null);
     }

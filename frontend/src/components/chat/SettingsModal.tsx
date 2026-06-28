@@ -173,12 +173,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
 
     if (Platform.OS === 'web') {
-      const ok = window.confirm('Are you absolutely sure you want to delete all chat threads, Sir? This cannot be undone.');
+      const ok = window.confirm('Are you absolutely sure you want to delete all chat threads? This cannot be undone.');
       if (ok) executeClear();
     } else {
       Alert.alert(
         'Clear Chat History',
-        'Are you absolutely sure you want to delete all chat threads, Sir? This cannot be undone.',
+        'Are you absolutely sure you want to delete all chat threads? This cannot be undone.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Delete All', style: 'destructive', onPress: executeClear },
@@ -207,12 +207,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
 
     if (Platform.OS === 'web') {
-      const ok = window.confirm('Are you absolutely sure you want to wipe all sandbox mini apps, Sir? This cannot be undone.');
+      const ok = window.confirm('Are you absolutely sure you want to wipe all sandbox mini apps? This cannot be undone.');
       if (ok) executeClear();
     } else {
       Alert.alert(
         'Wipe Sandbox Playground',
-        'Are you absolutely sure you want to wipe all sandbox mini apps, Sir? This cannot be undone.',
+        'Are you absolutely sure you want to wipe all sandbox mini apps? This cannot be undone.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Wipe Sandbox', style: 'destructive', onPress: executeClear },

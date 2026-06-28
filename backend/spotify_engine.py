@@ -9,7 +9,7 @@ async def run_laptop_spotify_command(cmd_manager, user_id, action_type, args) ->
     if not cmd_manager or user_id not in cmd_manager.active_laptops:
         return (
             "Error: No laptop is currently connected to this account. "
-            "Please launch the VoxKage Laptop Daemon to run Spotify remote commands, sir."
+            "Please launch the VoxKage Laptop Daemon to run Spotify remote commands."
         )
 
     # Map the tool parameters to the python automation command running on desktop

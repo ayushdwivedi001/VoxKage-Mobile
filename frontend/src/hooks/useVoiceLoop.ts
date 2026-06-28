@@ -60,7 +60,7 @@ export function useVoiceLoop(
     if (!audioRecorder) {
       showAlert(
         'Voice Recording Unavailable',
-        'Microphone/Audio recording is not supported in this client. The expo-audio module could not be loaded, Sir.'
+        'Microphone/Audio recording is not supported in this client. The expo-audio module could not be loaded.'
       );
       return;
     }
@@ -69,7 +69,7 @@ export function useVoiceLoop(
       try {
         const status = await AudioModule.requestRecordingPermissionsAsync();
         if (!status.granted) {
-          showAlert('Permission Denied', 'Microphone permission is required to record voice commands, Sir.');
+          showAlert('Permission Denied', 'Microphone permission is required to record voice commands.');
           return;
         }
 

@@ -32,7 +32,7 @@ export function useMediaPickers(
     try {
       const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
       if (!permissionResult.granted) {
-        showAlert('Permission Denied', 'Camera access is required, Sir.');
+        showAlert('Permission Denied', 'Camera access is required.');
         return;
       }
 
@@ -67,7 +67,7 @@ export function useMediaPickers(
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        showAlert('Permission Denied', 'Media library access is required, Sir.');
+        showAlert('Permission Denied', 'Media library access is required.');
         return;
       }
 
@@ -124,7 +124,7 @@ export function useMediaPickers(
 
   const handleFileUpload = async () => {
     if (!backendUrl || !token) {
-      showAlert('Configuration Error', 'Unable to upload file, Sir.');
+      showAlert('Configuration Error', 'Unable to upload file.');
       return;
     }
     setUploadingFile(true);
@@ -136,7 +136,7 @@ export function useMediaPickers(
 
       if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
         const fileAsset = pickerResult.assets[0];
-        setThinkingStatusLocal('Uploading document, Sir...');
+        setThinkingStatusLocal('Uploading document');
         
         const uploadUrl = `${backendUrl}/upload`;
         const mimeType = fileAsset.mimeType || 'application/octet-stream';
@@ -150,9 +150,9 @@ export function useMediaPickers(
         );
 
         if (uploadRes && uploadRes.filename) {
-          showAlert('Upload Successful', `File '${uploadRes.filename}' has been indexed, Sir.`);
+          showAlert('Upload Successful', `File '${uploadRes.filename}' has been indexed.`);
         } else {
-          showAlert('Upload Success', `File uploaded successfully, Sir.`);
+          showAlert('Upload Success', `File uploaded successfully.`);
         }
       }
     } catch (e: any) {
