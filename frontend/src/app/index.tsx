@@ -634,7 +634,7 @@ export default function ChatScreen() {
       />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'web' ? undefined : 'padding'}
         style={[
           styles.mainWrapper,
           Platform.OS !== 'web' && {
