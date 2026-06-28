@@ -1230,7 +1230,8 @@ export const styles = StyleSheet.create({
     },
     commandPopupContainer: {
       position: 'absolute',
-      bottom: 60,
+      bottom: '100%',
+      marginBottom: 8,
       left: 12,
       right: 12,
       backgroundColor: 'rgba(15, 23, 42, 0.95)',

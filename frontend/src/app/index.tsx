@@ -163,7 +163,7 @@ export default function ChatScreen() {
   const [sidebarAnim] = useState(() => new Animated.Value(-280));
   const [playgroundAnim] = useState(() => new Animated.Value(drawerWidth));
   const [borderGlowAnim] = useState(() => new Animated.Value(0));
-  const [keyboardAnim] = useState(() => new Animated.Value(0));
+  const [keyboardAnim] = useState(() => new Animated.Value(insets.bottom));
 
   const flatListRef = useRef<any>(null);
 
@@ -545,14 +545,23 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
+    // Keep initial/hidden keyboard padding synced with insets.bottom
+    keyboardAnim.setValue(insets.bottom);
+  }, [insets.bottom]);
+
+  useEffect(() => {
     if (Platform.OS === 'web') return;
 
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const showSub = Keyboard.addListener(showEvent, (e) => {
+      const targetPadding = Platform.OS === 'android'
+        ? e.endCoordinates.height + insets.bottom + 12
+        : e.endCoordinates.height + 12;
+
       Animated.timing(keyboardAnim, {
-        toValue: e.endCoordinates.height - insets.bottom,
+        toValue: targetPadding,
         duration: Platform.OS === 'ios' ? 250 : 150,
         useNativeDriver: false,
       }).start();
@@ -560,7 +569,7 @@ export default function ChatScreen() {
 
     const hideSub = Keyboard.addListener(hideEvent, () => {
       Animated.timing(keyboardAnim, {
-        toValue: 0,
+        toValue: insets.bottom,
         duration: Platform.OS === 'ios' ? 200 : 100,
         useNativeDriver: false,
       }).start();
@@ -667,10 +676,7 @@ export default function ChatScreen() {
           styles.mainWrapper,
           Platform.OS !== 'web' && {
             paddingTop: insets.top,
-            paddingBottom: keyboardAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [insets.bottom, insets.bottom + 1],
-            }) as any,
+            paddingBottom: keyboardAnim as any,
           },
         ]}
       >
@@ -731,63 +737,66 @@ export default function ChatScreen() {
           />
         )}
 
-        {/* Autocomplete suggestion popup */}
-        {showCommandPopup && filteredCommands.length > 0 && (
-          <View style={styles.commandPopupContainer}>
-            {filteredCommands.map((cmd, idx) => {
-              const isActive = commandPopupActiveIndex === idx;
-              return (
-                <TouchableOpacity
-                  key={cmd.name}
-                  style={[styles.commandPopupItem, isActive && styles.commandPopupActive]}
-                  onPress={() => {
-                    webSocket.setInputText(cmd.name + ' ');
-                    setShowCommandPopup(false);
-                  }}
-                >
-                  <Text style={styles.commandPopupText}>{cmd.name}</Text>
-                  <Text style={styles.commandPopupDesc}>{cmd.desc}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
+        {/* Relative wrapper to sync absolute positioned autocomplete suggestion popup with ChatInput during padding changes */}
+        <View style={{ position: 'relative', width: '100%', zIndex: 10 }}>
+          {/* Autocomplete suggestion popup */}
+          {showCommandPopup && filteredCommands.length > 0 && (
+            <View style={styles.commandPopupContainer}>
+              {filteredCommands.map((cmd, idx) => {
+                const isActive = commandPopupActiveIndex === idx;
+                return (
+                  <TouchableOpacity
+                    key={cmd.name}
+                    style={[styles.commandPopupItem, isActive && styles.commandPopupActive]}
+                    onPress={() => {
+                      webSocket.setInputText(cmd.name + ' ');
+                      setShowCommandPopup(false);
+                    }}
+                  >
+                    <Text style={styles.commandPopupText}>{cmd.name}</Text>
+                    <Text style={styles.commandPopupDesc}>{cmd.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
-        {/* Input Bar Section */}
-        <ChatInput
-          inputText={inputText}
-          setInputText={webSocket.setInputText}
-          handleSendMessage={webSocket.handleSendMessage}
-          handleFileUpload={mediaPickers.handleFileUpload}
-          handleVoicePress={voiceLoop.handleVoicePress}
-          isVoiceActive={voiceLoop.isVoiceActive}
-          isTranscribing={voiceLoop.isTranscribing}
-          micVolume={voiceLoop.micVolume}
-          uploadingFile={loading}
-          loading={loading}
-          showBtwOverlay={webSocket.showBtwOverlay}
-          activeModel={activeModel}
-          formatModelName={formatModelName}
-          VARIANTS={VARIANTS}
-          activeVariantIndex={activeVariantIndex}
-          setActiveVariantIndex={setActiveVariantIndex}
-          showVariantDropdown={showVariantDropdown}
-          setShowVariantDropdown={setShowVariantDropdown}
-          setShowModelModal={setShowModelModal}
-          activeEditingProjectId={playground.activeEditingProjectId}
-          projects={playground.projects}
-          setActiveEditingProjectId={playground.setActiveEditingProjectId}
-          handleStopGeneration={webSocket.handleStopGeneration}
-          contextPercent={contextPercent}
-          stagedAttachment={mediaPickers.stagedAttachment}
-          setStagedAttachment={mediaPickers.setStagedAttachment}
-          showMediaPopover={showMediaPopover}
-          setShowMediaPopover={setShowMediaPopover}
-          handleCameraPress={mediaPickers.handleCameraPress}
-          handlePhotosPress={mediaPickers.handlePhotosPress}
-          handleFilesPress={mediaPickers.handleFilesPress}
-          onKeyPress={handleKeyPress}
-        />
+          {/* Input Bar Section */}
+          <ChatInput
+            inputText={inputText}
+            setInputText={webSocket.setInputText}
+            handleSendMessage={webSocket.handleSendMessage}
+            handleFileUpload={mediaPickers.handleFileUpload}
+            handleVoicePress={voiceLoop.handleVoicePress}
+            isVoiceActive={voiceLoop.isVoiceActive}
+            isTranscribing={voiceLoop.isTranscribing}
+            micVolume={voiceLoop.micVolume}
+            uploadingFile={loading}
+            loading={loading}
+            showBtwOverlay={webSocket.showBtwOverlay}
+            activeModel={activeModel}
+            formatModelName={formatModelName}
+            VARIANTS={VARIANTS}
+            activeVariantIndex={activeVariantIndex}
+            setActiveVariantIndex={setActiveVariantIndex}
+            showVariantDropdown={showVariantDropdown}
+            setShowVariantDropdown={setShowVariantDropdown}
+            setShowModelModal={setShowModelModal}
+            activeEditingProjectId={playground.activeEditingProjectId}
+            projects={playground.projects}
+            setActiveEditingProjectId={playground.setActiveEditingProjectId}
+            handleStopGeneration={webSocket.handleStopGeneration}
+            contextPercent={contextPercent}
+            stagedAttachment={mediaPickers.stagedAttachment}
+            setStagedAttachment={mediaPickers.setStagedAttachment}
+            showMediaPopover={showMediaPopover}
+            setShowMediaPopover={setShowMediaPopover}
+            handleCameraPress={mediaPickers.handleCameraPress}
+            handlePhotosPress={mediaPickers.handlePhotosPress}
+            handleFilesPress={mediaPickers.handleFilesPress}
+            onKeyPress={handleKeyPress}
+          />
+        </View>
       </Animated.View>
 
       {/* Stateless Side-Channel /btw Bottom Sheet Backdrop and Overlay */}
