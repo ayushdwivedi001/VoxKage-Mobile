@@ -47,3 +47,12 @@ discussion.txt
 
 # Runtime data uploads
 backend/data/
+
+# Project-level CLAUDE.md (VoxKage agent instructions, not project config)
+CLAUDE.md
+
+# Backup files
+*.pre_voxkage
+
+# VoxKage Mobile idea notes
+voxkage-mobile-idea.txt
