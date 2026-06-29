@@ -1,5 +1,3 @@
-# VoxKage Mobile
-
 <p align="center">
   <img src="frontend/assets/images/VoxKage_Readme.png" alt="VoxKage Header Banner" width="100%">
 </p>
