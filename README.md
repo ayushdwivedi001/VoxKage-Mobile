@@ -38,7 +38,7 @@ The backend FastAPI application runs inside a Docker container on Hugging Face S
 A lightweight client running locally on your computer. When the backend agent triggers an OS-level capability (such as executing shell commands, retrieving local files, running local web crawlers, or compiling code), the request is forwarded via secure WebSocket channels to the local bridge client, which executes it locally and feeds back the terminal output.
 
 ### 3. Local Mobile IP Routing (OpenCode Zen completions)
-To bypass cloud-level API rate-limiting or network blockages (such as Jio/Airtel SNI connection resets), when compiled to a standalone APK, VoxKage Mobile routes OpenCode Zen API completions directly from the mobile device's local network connection to `https://opencode.ai/zen/v1`, keeping traffic clean and fast.
+To bypass cloud-level API rate-limiting or network blockages from the Hugging Face Cloud IP hosting, when compiled to a standalone APK, VoxKage Mobile routes OpenCode Zen API completions directly from the mobile device's local IP network connection to `https://opencode.ai/zen/v1`, keeping traffic clean and fast.
 
 ### 4. Heartbeat Keep-Alive Workflow
 A recurring GitHub action that automatically pings the FastAPI backend health endpoint every 10 minutes, preventing the Hugging Face Space from entering sleep mode due to inactivity.
@@ -75,7 +75,7 @@ To set up your own independent instance of VoxKage Mobile, you must configure th
    - `OPENCODE_API_KEY`: Your OpenCode Zen API key.
    - `JWT_SECRET_KEY`: A secure random string to sign JWT tokens.
    - `VOXKAGE_MASTER_KEY`: A secure master passphrase used to authenticate master-login/registration.
-   - `GROQ_API_KEY` *(Optional)*: Groq key for faster secondary agent actions.
+   - `GROQ_API_KEY` *(Optional)*: Groq key for voice transcriptions and voice chat.
    - `SMTP_SERVER` / `SMTP_PORT` / `SENDER_EMAIL` / `SENDER_PASSWORD` *(Optional)*: For sending registration OTPs.
 
 ### 2. Supabase Database Instance
